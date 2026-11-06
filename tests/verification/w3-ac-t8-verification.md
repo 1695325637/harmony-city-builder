@@ -87,8 +87,16 @@
 
 ## 4. 观察项（不判 FAIL，但需留痕）
 
-1. **数据通路联调未完成（S-08 剩余项，非 AC-T8 违约）**：`src/ui/hud/legend.ts` 仍接 `MOCK_FLOW_LEGEND`（header 标注 `pending:s04`，且 `hud-static-scan` 反向断言「mock 必须保留」）；渲染侧 `draw-list.ts` 有 `DEFAULT_FLOW_LINE['flow.*']` 与 `OverlaySpec.token.id`，但**尚无显式的 `TickResult.flowState[] → 渲染叠层` 的接线函数**（`src/render` 内 `grep flowState` 无消费点）。契约与类型已就位，真实枚举→图例/流线的数据灌入待 S-08 完成。**这是「待接线」而非「判定缺失」**，建议在 S-08 收口验收里显式列一条「真实 flowState 接入 draw-list 与 legend」的关门项，避免 mock 带病进 S-12。
-2. **`pending:s04` 注释已部分过时**：T-133 已落地 `TickResult.flowState`，但 `legend.ts`/`types.ts` 头仍写「尚未由 T-133 产出」——建议下轮顺带把注释改为「mock 待 S-08 真实图例下发替换」，防后人误读（文档层，非缺陷）。
+> **订正（2026-11-06 · 主理人，T-135 落地后）**：原观察项 1、2 已由 **T-135（S-09 第一批 B 线）** 关闭，下方保留原文以备追溯，随后附订正结论。本节原始判定（「不判 FAIL、GAP-13 可关闭」）不变。
+
+**原文（历史留痕，已于 2026-11-06 关闭）**：
+1. ~~**数据通路联调未完成（S-08 剩余项，非 AC-T8 违约）**：`src/ui/hud/legend.ts` 仍接 `MOCK_FLOW_LEGEND`（header 标注 `pending:s04`，且 `hud-static-scan` 反向断言「mock 必须保留」）；渲染侧 `draw-list.ts` 有 `DEFAULT_FLOW_LINE['flow.*']` 与 `OverlaySpec.token.id`，但**尚无显式的 `TickResult.flowState[] → 渲染叠层` 的接线函数**（`src/render` 内 `grep flowState` 无消费点）。契约与类型已就位，真实枚举→图例/流线的数据灌入待 S-08 完成。**这是「待接线」而非「判定缺失」**，建议在 S-08 收口验收里显式列一条「真实 flowState 接入 draw-list 与 legend」的关门项，避免 mock 带病进 S-12。~~
+2. ~~**`pending:s04` 注释已部分过时**：T-133 已落地 `TickResult.flowState`，但 `legend.ts`/`types.ts` 头仍写「尚未由 T-133 产出」——建议下轮顺带把注释改为「mock 待 S-08 真实图例下发替换」，防后人误读（文档层，非缺陷）。~~
+
+**订正结论（T-135 / T-136 复核后）**：
+- **`MOCK_FLOW_LEGEND` 已删除**，`src/ui/**` 全仓零 `mock` / 零 `pending:s04` 残留；`HUD-SCAN-7` 由「mock 必须保留」反向断言改写为「UI 不得定义/消费 mock 图例常量」正向断言，并经 quality-lead 突变测试证明非永真（注入 mock 即转红、撤销复绿）。
+- **接线函数已落地**：`src/render/flow-legend.ts`（142 行）提供 `FLOW_TOKEN_ID` 唯一映射、`buildFlowLegend`、`buildFlowOverlays(flowState, tokenMap, edgeToCell)`；`draw-list.ts` 一行未改（`deriveLine` + `options.overlays` 原有能力即可消费）。`RF-7` 用真实 `runTick` 产出的 `TickResult.flowState[]` 跑通 `buildDrawList` 全链，quality-lead T-136 判 **B 线 8/8 PASS**。
+- **仍待接线的部分（新遗留，非原观察项）**：模拟层 `solveTraffic` 按 R→I 块对写 `qSlot` 时未落 `cellIndex`，故**生产侧「边槽→格」映射生成器**尚未实现；`buildFlowOverlays` 的 `edgeToCell` 是必填显式入参，测试由用例充当视图模型提供映射，空映射诚实降级为空叠层。quality-lead T-136 判定为「**待接线、不阻塞第一批出门**」，归属建议：**列为 S-09 第二批收口验收的显式关门项**（首选模拟层在 `TrafficResult` 补 `edgeCells` 导出；备选视图模型基于邻接表构造并加运行时断言；**严禁**拿循环下标冒充 cellIndex）；若到 W5 准出未补，届时视觉正确性判 FAIL，不追溯改判本批。
 
 ---
 

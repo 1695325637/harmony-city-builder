@@ -92,8 +92,21 @@ test('HUD-SCAN-6 通勤态令牌不得进 HUD：代码层不绑定 flow.* 字面
 test('HUD-SCAN-7 OpaqueSwatch 契约：HUD 不得解析 swatch.paint 内部（paint 为 unknown）', () => {
   // UI 只消费 label；若有人写 `swatch.paint.color` 之类即违约（且类型上本应编不过）。
   assert.deepEqual(offenders(/\.paint\.[A-Za-z_$]/), [], 'HUD 不得深入 paint 内部');
-  // 反向保护：'flow-state' 事件类型名仍存在（不被当违规清理）
-  assert.ok(read(join(HUD_ROOT, 'legend.ts')).indexOf('MOCK_FLOW_LEGEND') >= 0, '图例 mock 必须保留（pending:s04）');
+  // T-135 正向断言：图例来自渲染层下发 / 注入，UI 不得再定义或消费 mock 图例常量。
+  assert.equal(
+    read(join(HUD_ROOT, 'legend.ts')).indexOf('MOCK_FLOW_LEGEND') >= 0,
+    false,
+    'UI 不得定义 / 消费 mock 图例常量（真实图例由渲染层下发）',
+  );
+  assert.equal(
+    read(join(HUD_ROOT, 'types.ts')).indexOf('MOCK_FLOW_LEGEND') >= 0,
+    false,
+    'types.ts 不得导出 mock 图例常量',
+  );
+  assert.ok(
+    /setFlowLegendProvider/.test(readCode(join(HUD_ROOT, 'legend.ts'))),
+    'legend.ts 必须提供渲染层图例注入点',
+  );
 });
 
 test('HUD-SCAN-8 HUD 零依赖：import 均为带 .ts 的相对路径', () => {
@@ -115,8 +128,9 @@ test('HUD-SCAN-9 HUD 仅消费 flow 枚举、不引用 flow.* 令牌（枚举在
   // 扫描**代码**（剥注释）：注释会明文列举禁用字面 id 作为文档，不应误伤。
   const typesCode = readCode(join(HUD_ROOT, 'types.ts'));
   const legendCode = readCode(join(HUD_ROOT, 'legend.ts'));
-  // 三态枚举值 'clear'/'slow'/'congested' 必须存在（在 MOCK_FLOW_LEGEND，types.ts）
-  assert.ok(/'clear'|'slow'|'congested'/.test(typesCode), 'MOCK_FLOW_LEGEND 必须消费三态枚举');
+  // 三态枚举值 'clear'/'slow'/'congested' 必须存在（T-135 后由 types.ts 的 FlowState 联合类型声明，
+  // 不再是 mock 图例常量；真实图例由渲染层 buildFlowLegend 下发）
+  assert.ok(/'clear'|'slow'|'congested'/.test(typesCode), 'FlowState 必须声明三态枚举');
   // 两文件代码均不得写 'flow.clear' 之类的令牌 id（只消费枚举，不引用 flow.* 令牌）
   assert.equal(/'flow\.(clear|slow|congested)'/.test(typesCode), false, 'types 不得写 flow.* 令牌 id');
   assert.equal(/'flow\.(clear|slow|congested)'/.test(legendCode), false, 'legend 不得写 flow.* 令牌 id');

@@ -177,7 +177,7 @@ test('LEG-2 图例色块为不透明 OpaqueSwatch：UI 只读 label，不解析 
   for (const item of getFlowLegend()) {
     // 不透明契约：paint 为 unknown，UI 不得取其 color/shape 字段（由静态扫描钉死）
     assert.equal(item.swatch.label.length > 0, true, 'label 可读');
-    // 当前 mock 用 null 占位；真实值由渲染层下发且类型不透明
+    // T-135：paint 由渲染层用真实语义令牌填充，对 UI 仍是 unknown（整块透传、不解析）
     assert.equal(typeof item.swatch.paint === 'object' || item.swatch.paint === null, true);
   }
 });

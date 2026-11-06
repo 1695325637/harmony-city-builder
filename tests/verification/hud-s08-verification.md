@@ -71,7 +71,7 @@
 | 折叠屏实测（folded↔unfolded 实时重排） | 未测 | 仅单元测试重排操作，未上折叠屏 |
 | 文本缩放 100–200% 实测（截断/重叠） | 未测 | 仅布局模型算，未上真机渲染 |
 | Cocos UI 渲染（HUD 实际绘制） | 未测 | 本层只产出 VM/布局模型，绘制在 Cocos 适配层 |
-| `flowState` 真枚举（T-133 未落地） | 替代 | 图例接 `MOCK_FLOW_LEGEND`（枚举 + label），标 `pending:s04`；T-133 落地后改为渲染层下发，HUD 不改动 |
+| ~~`flowState` 真枚举（T-133 未落地）~~ → **已关闭（2026-11-06 · T-135）** | **已接通** | 原为「图例接 `MOCK_FLOW_LEGEND`（枚举 + label），标 `pending:s04`」。现 `MOCK_FLOW_LEGEND` 已删除、`pending:s04` 零残留；图例默认数据源改为渲染层 `buildFlowLegend()` 真实令牌（`swatch.paint` 不透明），由 `setFlowLegendProvider` 注入解耦；`legendLabels()` 仍恒为畅/缓/堵。**仍待接线**：生产侧「边槽→格」映射生成器（模拟层未落 `cellIndex`），已登记为 S-09 第二批显式关门项，详见 `w3-ac-t8-verification.md §4` 订正结论 |
 | 真机减少动态效果实测 | 未测 | 仅策略声明 + 单元测试，未上真机 |
 | 低性能档控件树裁剪实测 | 未测 | 仅断言「两档核心控件均达标」，未实测裁剪树 |
 | 减动效下静态编码真机观感 | 未测 | 仅断言编码非空 + 通道 ≥2 |

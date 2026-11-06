@@ -147,6 +147,10 @@ test('SCAN-9 通道隔离的类型保证：EventDetail 没有 tickId 字段，BE
 test('SCAN-10 本层文件清单固定（防越界新增 / 防误把预览页或渲染代码搬进来）', () => {
   const names = uiFiles().map(basename).sort();
   assert.deepEqual(names, [
+    // —— S-09 第一批 A 线 · 诊断数据层（src/ui/diagnosis/**），按字典序排在 feedback-* 之前 ——
+    'diagnosis/diagnosis-query.ts',
+    'diagnosis/index.ts',
+    'diagnosis/types.ts',
     'feedback-bus.ts',
     'feedback-timing.ts',
     // —— S-08 竖屏 HUD 子模块（src/ui/hud/**），按字典序排在 index.ts 之前 ——

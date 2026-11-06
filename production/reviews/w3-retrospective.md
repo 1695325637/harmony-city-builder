@@ -4,9 +4,11 @@
 | --- | --- |
 | 阶段范围 | S-06 等距渲染层（只读视图）→ S-07 UI 双通道（ADR-004）→ S-08 竖屏 HUD / 议题 / 建造与预算 → T-133 模拟层 flowState（AC-T8） |
 | 汇编人 | 主理人（游承峰） |
-| 日期 | 2026-11-06 · v1.0 |
-| 依据（只读） | `tests/verification/w3-ac-t8-verification.md`、`tests/traceability-matrix.md`、`design/gdd/systems/03-traffic-commute.md` v1.1 §3.5、`src/README.md` §2.1/§2.2、三方测试运行记录 |
+| 日期 | 2026-11-06 · **v1.1**（§6 口径订正：S-09 正名；原 v1.0 的 §0~§5、§7 判定与证据均未改动） |
+| 依据（只读） | `tests/verification/w3-ac-t8-verification.md`、`tests/traceability-matrix.md`、`design/gdd/systems/03-traffic-commute.md` v1.1 §3.5、`src/README.md` §2.1/§2.2、`production/epics/epic-breakdown.md §262`、三方测试运行记录 |
 | **阶段判定** | **S-06 = PASS · S-07 = PASS · S-08 = PASS（结构/契约完整）· T-133 = PASS · AC-T8 = COVERED · GAP-13 = CLOSED · 全量 289/289 全绿** |
+
+> **v1.1 订正说明**：v1.0 §6 曾把 S-09 误写为「等距渲染与图集分包」，系误读 sprint-01 W3 表格合并主题。S-09 正确定义为**诊断面板 V2 与两级反馈**（epic-breakdown §262）；「真实 flowState 接线」归 S-06 遗留联调。详见 §6 订正块。本订正**不改变** W3 阶段判定与任何测试证据。
 
 ---
 
@@ -63,8 +65,8 @@
 
 ## 4. 遗留联调项（观察项，不阻塞本阶段判定）
 
-1. **真实 `flowState` 接入 draw-list 与 legend（S-09 首项）**：`src/ui/hud/legend.ts` 仍接 `MOCK_FLOW_LEGEND`（`pending:s04`）；`src/render` 内 `grep flowState` 无消费点——模拟层已产出枚举、渲染层已备 `DEFAULT_FLOW_LINE['flow.*']`，但「`TickResult.flowState[] → 渲染叠层 → 图例条目下发」的接线函数尚未写。契约与类型已就位，属「待接线」而非「判定缺失」。**S-09 开工时列为首项关门项**，避免 mock 带病进 S-12。
-2. **`pending:s04` 注释过时（文档层）**：T-133 已产出 `TickResult.flowState`，`legend.ts`/`types.ts` 头仍写「尚未由 T-133 产出」，S-09 接线时顺带改。
+1. **真实 `flowState` 接入 draw-list 与 legend（属 S-06 渲染层遗留联调；v1.1 订正归属）**：`src/ui/hud/legend.ts` 仍接 `MOCK_FLOW_LEGEND`（`pending:s04`）；`src/render` 内 `grep flowState` 无消费点——模拟层已产出枚举、渲染层已备 `DEFAULT_FLOW_LINE['flow.*']`，但「`TickResult.flowState[] → 渲染叠层 → 图例条目下发」的接线函数尚未写。契约与类型已就位，属「待接线」而非「判定缺失」。**用户 2026-11-06 拍板列为 S-09 的并行前置项（T-135）**，避免 mock 带病进 S-12。（v1.0 曾误记为「S-09 首项」，S-09 实为诊断面板 V2，见 §6 订正块。）
+2. **`pending:s04` 注释过时（文档层）**：T-133 已产出 `TickResult.flowState`，`legend.ts`/`types.ts` 头仍写「尚未由 T-133 产出」，由 T-135 接线时顺带改。
 
 ---
 
@@ -77,10 +79,18 @@
 
 ---
 
-## 6. 下一步（待用户拍板）
+## 6. 下一步（用户已于 2026-11-06 拍板）
 
-- **S-09 = 等距渲染与图集分包 + 真实 flowState 接线**：首项即 §4 联调项 1（渲染层消费 `flowState[]` 产出三态叠层 + 图例条目下发，UI legend 从 mock 换真实），随后进入图集分包与真实渲染集成。
-- 或：先审阅本阶段交付（含本回顾 + `w3-ac-t8-verification.md`），再进 S-09。
+> **订正（2026-11-06 · 主理人自纠）**：v1.0 本节曾把 S-09 写成「等距渲染与图集分包 + 真实 flowState 接线」，系误读 `production/sprint-01.md §3.2` W3 表格中四个 Story 的**合并交付主题**为 S-09 单行定义。按 `production/epics/epic-breakdown.md §262`，正确归属为：`S-06` = 等距渲染层与图集分包（已交付）、`S-07` = UI 双通道（已交付）、`S-08` = 竖屏 HUD（已交付）、**`S-09` = 诊断面板 V2 与两级反馈（V2/V7）**，直接支撑 **AC2**。据此，§4 联调项 1 属 **S-06 渲染层的未完成接线**，不属 S-09 交付范围，改列为 S-09 的并行前置项。
+
+用户拍板三项：**分两批 / 真实 flowState 接线并行前置 / 全量写入授权**。
+
+- **第一批（进行中）**：
+  - **A 线 · T-134（engineering-ui）**：S-09 诊断数据层——只读查询 VM（从 `Δ_t` + 归因链汇聚四段：主因 → 贡献量 → 明细 → 建议动词）、跨 2~3 周期归档查询、AC2 用例；并落地 T-113 裁定的两条下游约束（耦合项数值披露、首 tick 教学式解释）。
+  - **B 线 · T-135（engineering-lead，并行）**：S-06 遗留联调——`TickResult.flowState[] → 渲染层 draw-list 三态叠层 + 图例条目下发`，UI `legend.ts` 从 mock 换真实；严守「枚举≠令牌」与 `OpaqueSwatch.paint` 不透明契约。
+  - 两线文件域严格隔离（A 线独占 `src/ui/diagnosis/**` + `diagnosis-*.test.ts`；B 线独占 `src/render/**`、hud legend/types、相关静态扫描与 README 索引），防重演 D-15 双写覆盖事故。
+- **第二批（待第一批验收后）**：L2 诊断面板 UI + 两级反馈可观测（即时 <100ms vs tick 后）、单屏 ≤1 数据面板的分层披露落地、面板与 L1 互斥。
+- 后续：quality-lead 独立复核 → W3/S-09 阶段回顾 → 主理人统一 `git commit`。
 
 ---
 
@@ -93,4 +103,4 @@
 
 ---
 
-*文档结束 · W3 收口 · S-06/S-07/S-08/T-133 交付 · AC-T8 COVERED · GAP-13 CLOSED · 289/289 全绿 · 遗留「真实 flowState 接线」为 S-09 首项*
+*文档结束 · W3 收口 · S-06/S-07/S-08/T-133 交付 · AC-T8 COVERED · GAP-13 CLOSED · 289/289 全绿 · 2026-11-06 订正 §6：S-09 = 诊断面板 V2；「真实 flowState 接线」归 S-06 遗留联调、列为 S-09 并行前置项（T-135）· 用户已拍板进 S-09*

@@ -1,27 +1,50 @@
 /**
- * HC-08 · UI 层 · 通勤三态图例（S-08 项 7：只消费渲染层图例，不碰 flow.* 令牌）
+ * HC-01 · UI 层 · 通勤三态图例（S-08 项 7 / T-135 真实接线）
  *
  * 权威口径（只读引用）：
- * - GDD 03 v1.1 §3.5.3 跨层契约：三态由模拟层出枚举、渲染层出 `flow.*` 编码，
- *   **UI 不查表、不判阈值、不拿 q/cap，也不得引用 `flow.*` 字面 id**；
+ * - GDD 03 v1.1 §3.5.3：三态由模拟层出枚举、渲染层出编码，
+ *   **UI 不查表、不判阈值、不拿饱和度，也不得引用任何字面令牌 id**；
  * - team-lead 2026-11-06 裁定（OpaqueSwatch ②）：图例色块由渲染层产出，
- *   UI 只读 `label` 并整块透传 `paint`（`unknown`），不解析内部。
+ *   UI 只读 `label` 并整块透传 `paint`（`unknown`），不解析内部；
+ * - AD-004 双通道：三态着色属通道 B（tick 结算后），即时通道 A 不读三态数据。
+ *
+ * T-135 接线（替换旧的 mock 图例常量）：
+ * - **默认数据源 = 渲染层 `buildFlowLegend()` 产出的真实图例**（真实语义令牌色块），
+ *   本文件不再定义任何图例常量 / 占位色块；
+ * - `setFlowLegendProvider` 是组合根 / 预览页 / 测试的注入点：可注入绑定了应用
+ *   `SemanticTokenMap` 的 provider（显式传参亦可，见 `getFlowLegend` 的可选入参）；
+ * - `getFlowLegend()` 无参调用的既有行为完整保留（LEG-1 / LEG-2 不打穿），
+ *   `legendLabels()` 恒为 畅 / 缓 / 堵。
  *
  * 纪律（被静态扫描钉定）：
- * - 本文件**不 import `flow.*` 令牌**、不调用 `tokenById('flow.*')`；
- * - 枚举值是 `'clear' / 'slow' / 'congested'`（无 `flow.` 前缀），与令牌 id 区分；
- * - UI 侧永不得出现 `'flow.clear' / 'flow.slow' / 'flow.congested'` 字面令牌 id。
- *
- * pending:s04 —— 模拟层 `TickResult.flowState` 尚未由 T-133 产出，
- * 图例先接 `MOCK_FLOW_LEGEND`（mock 枚举 + label）。T-133 落地后改为渲染层下发，
- * 本文件对外接口（`getFlowLegend` / 只取 label）不变。
+ * - 枚举值是 `'clear' / 'slow' / 'congested'`（无前缀），与渲染层令牌 id 是两回事；
+ * - UI 侧永不得出现任何字面令牌 id，也永不解析 `swatch.paint` 内部字段。
  */
 
-import { MOCK_FLOW_LEGEND, type FlowLegendItem, type FlowState, type OpaqueSwatch } from './types.ts';
+import { buildFlowLegend } from '../../render/flow-legend.ts';
+import type { FlowLegendItem, FlowLegendProvider, FlowState, OpaqueSwatch } from './types.ts';
 
-/** 取通勤三态图例条目（渲染层下发；当前为 mock，pending:s04） */
-export function getFlowLegend(): readonly FlowLegendItem[] {
-  return MOCK_FLOW_LEGEND;
+/**
+ * 默认 provider：渲染层下发的真实三态图例（无参即可用）。
+ * 组合根可经 `setFlowLegendProvider` 换成绑定应用令牌表的版本。
+ */
+let provider: FlowLegendProvider = () => buildFlowLegend();
+
+/**
+ * 注入渲染层真实图例；传 `undefined` 复位为默认 provider。
+ * 这是「渲染层出编码 → UI 排布文字」的唯一接线口，UI 自身不生产图例数据。
+ */
+export function setFlowLegendProvider(next: FlowLegendProvider | undefined): void {
+  provider = next ?? (() => buildFlowLegend());
+}
+
+/**
+ * 取通勤三态图例条目（真实图例，非 mock）。
+ * `explicit` 为显式传参通道：传入时以它为准，便于调用方注入当帧图例，
+ * 但不传时行为与既有版本完全一致。
+ */
+export function getFlowLegend(explicit?: readonly FlowLegendItem[]): readonly FlowLegendItem[] {
+  return explicit ?? provider();
 }
 
 /**
@@ -38,4 +61,4 @@ export function legendItemFor(state: FlowState): FlowLegendItem | undefined {
 }
 
 /** 类型导出：UI 仅以「不透明」形式接收渲染层色块，不解析内部 */
-export type { OpaqueSwatch, FlowLegendItem, FlowState };
+export type { OpaqueSwatch, FlowLegendItem, FlowState, FlowLegendProvider };

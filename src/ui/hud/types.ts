@@ -1,14 +1,17 @@
 /**
- * HC-01 · UI 层 · 竖屏 HUD 共享类型（S-08）
+ * HC-01 · UI 层 · 竖屏 HUD 共享类型（S-08 / T-135 接线）
  *
  * 本文件只放 HUD 层的**类型与常量**，不 import 引擎 / 不读时钟 / 不读 tick。
  * 视觉色值 / 形状一律不在此出现——HUD 只消费枚举、label 与渲染层下发的
- * 不透明色块（`OpaqueSwatch`），绝不查语义令牌表、绝不读 `flow.*` 字面 id。
+ * 不透明色块（`OpaqueSwatch`），绝不查语义令牌表、绝不读字面令牌 id。
  *
  * 跨层契约（GDD 03 v1.1 §3.5.3 + team-lead 2026-11-06 裁定）：
  * - 通勤三态 = **枚举** `FlowState`，不是令牌；
  * - 图例色块 = 渲染层产出的 `OpaqueSwatch`（UI 只读 `label`，`paint` 为 `unknown`）；
- * - UI 侧永不得出现 `'flow.clear' / 'flow.slow' / 'flow.congested'` 字面令牌 id。
+ * - UI 侧永不得出现任何字面令牌 id —— 该映射的唯一落点在渲染层。
+ *
+ * T-135：真实图例已由渲染层下发（见 `legend.ts` 的 `setFlowLegendProvider` 注入点）。
+ * 本层不再定义任何 mock 图例常量；`FlowLegendProvider` 是跨层注入契约的唯一类型声明。
  */
 
 // ---------------------------------------------------------------------------
@@ -126,14 +129,9 @@ export interface FlowLegendItem {
 }
 
 /**
- * pending:s04 —— 模拟层 `TickResult.flowState` 尚未由 T-133 产出，
- * 图例先接 mock 枚举（UI 侧只消费枚举与 label，不读 `flow.*` 令牌 id）。
- * 一旦 T-133 落地，本 mock 列表改为由模拟层 + 渲染层下发，UI 不改动。
- * 注意：条目值是 `'clear' / 'slow' / 'congested'`（**枚举**，无 `flow.` 前缀），
- * 与令牌 id `'flow.clear'` 等是两回事——`src/ui/**` 静态扫描禁止后者出现。
+ * 图例数据源注入契约（T-135）：由渲染层产出的真实图例经组合根调用
+ * `setFlowLegendProvider` 注入，UI 自身不持有任何图例常量、不查令牌表。
+ * provider 只返回「枚举 + 不透明 swatch」；`paint` 恒为 `unknown`，
+ * UI 类型上写不出解析分支（GDD 03 v1.1 §3.5.3 裁定 ②）。
  */
-export const MOCK_FLOW_LEGEND: readonly FlowLegendItem[] = Object.freeze([
-  { flowState: 'clear', swatch: { label: '畅', paint: null } },
-  { flowState: 'slow', swatch: { label: '缓', paint: null } },
-  { flowState: 'congested', swatch: { label: '堵', paint: null } },
-]);
+export type FlowLegendProvider = () => readonly FlowLegendItem[];

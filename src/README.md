@@ -32,7 +32,7 @@
 | `src/simulation/snapshot.ts` | 258 | **T-116 最小内存实现**：`buildTickSnapshot` + `createInMemorySnapshotStore`（Keyframe/Delta 规则、冷归档恢复走 `deserializeState`、D-01 联动；介质为内存模拟，持久化留 S-05/S-09）；**T-133 `TickSnapshot.flowState` 标 `pending:S-05`（纯视觉派生，渲染层下发图例即可，不进冷归档）** |
 | `src/simulation/tick-pipeline.ts` | 446 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）** |
 | `src/simulation/session.ts` | 100 | 编排层 `createSimulation`：仅 `advanceDay`（V6）触发结算，连点幂等，结算中 gate 锁定；**T-116：入口 `assertConfigCompatible`（D-01 修复点 2）** |
-| `src/index.ts` | 15 | 统一导出 |
+| `src/index.ts` | 27 | 统一导出（T-135 增 `render/flow-legend.ts` 出口） |
 | `tests/unit/*.test.ts` | 869 | 8 个测试文件 / 51 条断言用例（7 文件 45 条基线 + `d01-config-compat.test.ts` 6 条 D-01 回归，见 §4） |
 | `tests/verification/*.test.ts` | 1238 | `edge-cases.test.ts`（quality-lead T-114，12 条；T-116 仅 V-06/V-STATIC 按修复后契约改写）+ `cold-archive-s05.test.ts`（6 条）+ `perf-s04.test.ts`（3 条） |
 
@@ -52,10 +52,11 @@
 | `src/render/asset-naming.ts` | 343 | **A-01 映射层**：内部 `assetKey` ↔ asset-spec §0.3 规范名（`toSheetName`/`fromSheetName`/`assertNamingCoverage`），真实切片接入改数据不改代码 |
 | `src/render/texture-format.ts` | 43 | ASTC → ETC2 → RGB565 → NONE 降级链；UI 图集固定 RGBA8888 |
 | `src/render/draw-list.ts` | 334 | 深度排序 + 按图集聚批 + DrawCall **估算** + `densityToSuffix`（0→无 / 1→d1 / 2→d2 / 3→d3） |
+| `src/render/flow-legend.ts` | 142 | **T-135**：枚举→`flow.*` 令牌 id 映射唯一落点 + `buildFlowLegend`（真实令牌填充不透明色块）+ `buildFlowOverlays`（`flowState[]` + 显式「边槽→格」映射 → `OverlaySpec[]`）；零色值 / 零阈值键 / 不 import simulation |
 | `src/render/backend.ts` | 33 | `RenderBackend` 契约（createNode / setFrame / setPosition / setScale / setDepth / destroy / batchBegin / batchEnd） |
 | `src/render/cocos/cocos-backend.ts` | 158 | 注入式 Cocos 适配（**不 import 'cc'**）；兄弟序 = `depthKey`；9-slice 预留；`verifiedInEngine=false` |
 
-- 对外导出：以上 9 个模块（含 `asset-naming`）均经 `src/index.ts` 的 `export *` 出口，故 `tsc --noEmit --strict … src/index.ts` 覆盖全部渲染模块；`src/render/cocos/` 亦经统一出口导入（仅类型 + 注入式工厂，无 `'cc'` 依赖）。
+- 对外导出：以上 10 个模块（含 `asset-naming` 与 T-135 的 `flow-legend`）均经 `src/index.ts` 的 `export *` 出口，故 `tsc --noEmit --strict … src/index.ts` 覆盖全部渲染模块；`src/render/cocos/` 亦经统一出口导入（仅类型 + 注入式工厂，无 `'cc'` 依赖）。
 - 预览：`preview/build.mjs` 用 `module.stripTypeScriptTypes` 从 `src/` 生成 `preview/dist/*.mjs`（单一真源），`preview/serve.mjs` 起 `127.0.0.1:8123`；默认 L0 全图概览，支持 `?lod=L0|L1|L2`。
 
 **⚠️ `diffViewModel` 只产「格级」信号（D-08 口径）**：它比较 `changeStamp`（`inputVersion` 快照）并在不同底层数组时兜底比对 zone / density / unlocked；**不覆盖** `S` / `tickId` / `cycleId` / `budget` 等非格字段。这些字段变化（P4 满意度、P7 预算结算）时可能返回空数组——消费方须自行比对 VM 上的这些字段或全量重建绘制列表。渲染帧不触发模拟，也不因非格字段变化重绘地块。
