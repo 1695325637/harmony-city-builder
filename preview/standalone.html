@@ -1,0 +1,3254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HC-01 · S-06 等距渲染预览（占位）</title>
+<!--
+  色值说明（A-12 登记）：本页 CSS 的 6 个色板副本 + 3 个横幅装饰色**仅用于预览页**，
+  禁止进入游戏 UI；游戏侧一律经 SemanticTokenMap 取色。理想形态是由令牌生成 CSS 变量，
+  本轮不改（登记为低优先，见 render-s06-verification.md §8）。
+
+  布局说明（T-126 / P-02）：`#stage` + `aside` 用 flex-wrap 弹性排布；
+  画布 CSS `width:100%; height:auto`（内部坐标系固定 1060×740，CSS 仅缩放显示尺寸），
+  ≥1024 宽不产生横向滚动；窄屏时面板换行到画布下方而非被裁切。
+  拾取换算已同步补正（app.mjs 的 screenToWorld 用 rect 缩放回内部像素）。
+-->
+<style>
+  :root {
+    /* 与 src/render/semantic-tokens.ts 的 BASE 色板一致（预览页副本，非游戏用色源） */
+    --canvas: #f4f6f8;
+    --panel: #f7f8fa;
+    --divider: #dce2e8;
+    --ink: #1b2430;
+    --ink2: #5a6675;
+    --primary: #2e6be6;
+    /* 横幅装饰色：仅预览页，禁止进入游戏 UI */
+    --warn-bg: #fff3cd;
+    --warn-line: #e6d08a;
+    --warn-ink: #6b4e00;
+  }
+  * { box-sizing: border-box; }
+  html, body { max-width: 100%; }
+  body {
+    margin: 0;
+    font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: var(--ink);
+    background: var(--canvas);
+  }
+  #banner {
+    position: sticky; top: 0; z-index: 10;
+    padding: 8px 12px; background: var(--warn-bg); border-bottom: 1px solid var(--warn-line);
+    color: var(--warn-ink); font-weight: 600; letter-spacing: .2px;
+  }
+  main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px;
+    align-items: flex-start;
+    max-width: 100%;
+  }
+  #stage {
+    flex: 1 1 640px;
+    min-width: 0;
+    max-width: 100%;
+    background: var(--canvas);
+    border: 1px solid var(--divider);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  /* 内部坐标系为 1060×740（canvas width/height 属性）；CSS 只缩放显示尺寸 */
+  canvas { display: block; width: 100%; height: auto; max-width: 100%; }
+  aside {
+    flex: 1 1 380px;
+    min-width: 0;
+    max-width: 460px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  section { background: var(--panel); border: 1px solid var(--divider); border-radius: 8px; padding: 10px 12px; }
+  h2 { font-size: 13px; margin: 0 0 6px; color: var(--ink); }
+  h2 small { color: var(--ink2); font-weight: 400; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--divider); background: #fff; cursor: pointer; }
+  button[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+  label.toggle { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  ol, ul { margin: 4px 0 0; padding-left: 18px; }
+  li { font-variant-numeric: tabular-nums; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  .muted { color: var(--ink2); }
+  .tag { display: inline-block; padding: 0 6px; border: 1px solid var(--divider); border-radius: 999px; font-size: 11px; color: var(--ink2); }
+  /* P-02：≤1024 宽时面板整体换行到画布下方，避免横向裁切 */
+  @media (max-width: 1024px) {
+    main { flex-direction: column; }
+    #stage { flex: 1 1 auto; width: 100%; }
+    aside { flex: 1 1 auto; max-width: 100%; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div id="banner">占位色块预览（非最终美术）· Cocos 适配未验证 · 绘制数据为程序化占位</div>
+<main>
+  <div id="stage">
+    <canvas id="map" width="1060" height="740" aria-label="16×16 等距地图预览（默认 L0 全图概览）"></canvas>
+  </div>
+  <aside>
+    <section>
+      <h2>LOD 档位 <small>（固定三档，无连续缩放）</small></h2>
+      <div class="row" id="lodRow">
+        <button data-lod="L0" aria-pressed="true">L0 · 0.5×</button>
+        <button data-lod="L1">L1 · 1.0×</button>
+        <button data-lod="L2">L2 · 2.0×</button>
+        <button id="overviewBtn" title="回到 L0 全图概览">概览</button>
+      </div>
+      <p class="muted" style="margin:6px 0 0">默认 L0 全图概览（世界包围盒居中）；<code>?lod=L0|L1|L2</code> 可直接指定档位；双击画布回 L1；点击任意格可拾取。</p>
+      <p class="muted" style="margin:4px 0 0"><b>LOD 叠加层口径</b>：L0 不画状态形状，通勤态以线宽 / 亮度表达；形状在 L1 / L2 生效（L1 形状带 1px <code>base.ink</code> 内描边）。</p>
+    </section>
+    <section>
+      <h2>绘制概览</h2>
+      <div id="summary" class="mono"></div>
+    </section>
+    <section>
+      <h2>深度绘制顺序 <small>（前 14 条，gx+gy → gx 平局）</small></h2>
+      <ol id="depthList" class="mono"></ol>
+    </section>
+    <section>
+      <h2>批次 / DrawCall 估算 <small>（建议基线，非承诺值）</small></h2>
+      <div id="batchInfo" class="mono"></div>
+    </section>
+    <section>
+      <h2>图集加载集 <small>（按激活分区集 + LOD）</small></h2>
+      <div id="loadSet" class="mono"></div>
+    </section>
+    <section>
+      <h2>可访问性 <small>（高对比模式预留，M-093）</small></h2>
+      <div class="row" style="margin-bottom:6px">
+        <label class="toggle"><input type="checkbox" id="highContrast" /> 高对比模式（图案 30% + 1px 描边）</label>
+      </div>
+      <div id="a11yInfo" class="mono"></div>
+    </section>
+    <section>
+      <h2>纹理格式探测 <small>（模拟能力，非真机）</small></h2>
+      <div id="formatInfo" class="mono"></div>
+    </section>
+  </aside>
+</main>
+<script type="text/javascript">
+/* HC-01 S-06 预览 bundle（自动生成，勿手改；源 = src/render + src/core + preview/app.mjs）
+ * classic script：无 import / export / require / fetch / XHR，file:// 下可直接运行。 */
+(function () {
+  'use strict';
+// =======================================================================
+// src/core/types.ts
+// =======================================================================
+/**
+ * HC-01 纯逻辑层 · 共享类型与常量
+ *
+ * 硬约束：本文件零平台 / 零引擎 / 零渲染依赖；不得出现墙上时钟、原生随机、
+ * 倍速自动播放、硬终局分支。所有平衡期数值都在 config.ts 的配置表中，本文件
+ * 只放结构性常量（网格上限、阶段编号、字段维度等），不放平衡结论。
+ */
+
+// ---------------------------------------------------------------------------
+// 版本与结构性常量（非平衡期数值）
+// ---------------------------------------------------------------------------
+
+const SCHEMA_VERSION = 'HC01-SCHEMA-1';
+const ENGINE_VERSION = 'HC01-CORE-0.1.0';
+
+/** MVP 硬上限：32×32 = 1024 格（architecture.md §10.2 / systems-index §7.1 已钉定） */
+const MAX_GRID_SIDE = 32;
+/** 起始解锁子集 16×16 = 256 格 */
+const START_UNLOCKED_SIDE = 16;
+
+/** zone 索引 0 / 1 为内建类型；2..N 由 config.zoneTypes 顺序生成 */
+const ZONE_EMPTY_INDEX = 0;
+const ZONE_ROAD_INDEX = 1;
+const DENSITY_NONE = 0;
+const DENSITY_MAX = 3;
+
+const FACTOR_COUNT = 4;
+const FACTOR_KEYS = ['f_c', 'f_s', 'f_e', 'f_f']         ;
+                                                     
+
+/** 单次结算的逻辑阶段上限（分区块合并，非逐格 OD） */
+const MAX_BLOCKS = 64;
+
+// ---------------------------------------------------------------------------
+// P0~P8 结算链（顺序固定；architecture.md §3.2 / systems-index §4.3）
+// ---------------------------------------------------------------------------
+
+const PIPELINE_STAGES = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8']         ;
+                                                       
+
+/** R1~R7 各有对应阶段（S-03 验收 3）。R8 状态可读由 P8 + 诊断层共同承担。 */
+const RULE_TO_STAGE                          = {
+  R1: 'P1', // 有限网格：命令应用 + 边界校验
+  R2: 'P1', // 分区类型 / 密度
+  R3: 'P5', // 市政预算按 tick 记账
+  R4: 'P2', // 交通网络 / 通勤图
+  R5: 'P0', // 低频 tick：冻结输入 + tickId
+  R6: 'P4', // 满意度 4 因子合成
+  R7: 'P7', // 时间 / 周期结算
+};
+
+                                                                         
+
+// ---------------------------------------------------------------------------
+// systems-index §4.2 共享数据字典（14 条，逐字口径）
+// ---------------------------------------------------------------------------
+
+                                 
+                 
+               
+                
+                
+ 
+
+const SHARED_VARIABLES                            = [
+  { symbol: 'N', unit: 'cell', range: '32×32 上限 / 16×16 起步', owner: '02' },
+  { symbol: 'P_t', unit: 'person', range: '>= 0，有限（过程量）', owner: '02' },
+  { symbol: 'J_t', unit: 'job', range: '>= 0，有限', owner: '02' },
+  { symbol: 'q_od', unit: 'person/tick', range: '>= 0', owner: '02 → 03' },
+  { symbol: 'cap_e', unit: 'FU/tick', range: '> 0', owner: '03' },
+  { symbol: 'T_c', unit: 'min', range: '>= 0', owner: '03' },
+  { symbol: 'f_c,f_s,f_e,f_f', unit: '无量纲', range: '[0,1]', owner: '01' },
+  { symbol: 'S_t', unit: '分', range: '[0,100]', owner: '01' },
+  { symbol: 'ΔS', unit: '分/tick', range: '[-100,100]', owner: '01' },
+  { symbol: 'I_t', unit: 'CU/周期', range: '>= 0（有下限保护）', owner: '04' },
+  { symbol: 'C_b,C_m', unit: 'CU / CU/周期', range: '>= 0', owner: '04' },
+  { symbol: 'B_t', unit: 'CU', range: '可负（软着陆）', owner: '04' },
+  { symbol: 'I_f', unit: 'CU/周期', range: '>= 0', owner: '04' },
+  { symbol: 'n_issue', unit: '条', range: '2~4（3±1 硬上限）', owner: '05' },
+];
+
+// ---------------------------------------------------------------------------
+// 命令与事件
+// ---------------------------------------------------------------------------
+
+                                                                           
+
+                          
+                    
+                         
+              
+            
+            
+                 
+                  
+                   
+ 
+
+                          
+                   
+                    
+                  
+                     
+                       
+
+                           
+                     
+                 
+                      
+                    
+                 
+ 
+
+// ---------------------------------------------------------------------------
+// 状态结构（TypedArray 存储，确定性、无遍历顺序依赖）
+// ---------------------------------------------------------------------------
+
+                             
+                   
+                      
+                       
+                     
+                            
+ 
+
+                        
+            
+                        
+              
+              
+            
+              
+             
+                           
+                    
+            
+ 
+
+                              
+            
+                    
+                    
+                      
+                     
+              
+                   
+ 
+
+                            
+                        
+                     
+                        
+               
+               
+                    
+                 
+                  
+                         
+                      
+                                          
+                                                
+                     
+                             
+                          
+ 
+
+                             
+                 
+               
+                 
+ 
+
+                            
+                 
+                 
+                
+                   
+ 
+
+// ---------------------------------------------------------------------------
+// 错误
+// ---------------------------------------------------------------------------
+
+class GridLimitExceededError extends Error {
+           side        ;
+  constructor(side        ) {
+    super(`grid side ${side} exceeds MVP hard limit ${MAX_GRID_SIDE}`);
+    this.name = 'GridLimitExceededError';
+    this.side = side;
+  }
+}
+
+class ConfigMismatchError extends Error {
+  constructor(reason        ) {
+    super(`config/schema mismatch: ${reason}`);
+    this.name = 'ConfigMismatchError';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 确定性序列化（逐字节可比对；键排序 + TypedArray 展开 + 数组保序）
+// ---------------------------------------------------------------------------
+
+function canonicalize(value         )         {
+  const encode = (v         )         => {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'number') {
+      if (Number.isNaN(v)) return '"NaN"';
+      if (!Number.isFinite(v)) return v > 0 ? '"Infinity"' : '"-Infinity"';
+      return Object.is(v, -0) ? '0' : String(v);
+    }
+    if (typeof v === 'boolean' || typeof v === 'string') return JSON.stringify(v);
+    if (ArrayBuffer.isView(v)) {
+      const a = v                                ;
+      let out = '[';
+      for (let i = 0; i < a.length; i++) out += (i ? ',' : '') + encode(a[i]);
+      return out + ']';
+    }
+    if (Array.isArray(v)) {
+      let out = '[';
+      for (let i = 0; i < v.length; i++) out += (i ? ',' : '') + encode(v[i]);
+      return out + ']';
+    }
+    if (typeof v === 'object') {
+      const obj = v                           ;
+      const keys = Object.keys(obj).sort();
+      let out = '{';
+      for (let i = 0; i < keys.length; i++) {
+        out += (i ? ',' : '') + JSON.stringify(keys[i]) + ':' + encode(obj[keys[i]]);
+      }
+      return out + '}';
+    }
+    return JSON.stringify(String(v));
+  };
+  return encode(value);
+}
+
+/** FNV-1a 32×2，零依赖、确定性；输入为 canonicalize 后的稳定字符串 */
+function hashString(input        )         {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < input.length; i++) {
+    h1 = Math.imul(h1 ^ input.charCodeAt(i), 0x01000193) >>> 0;
+    h2 = Math.imul(h2 + input.charCodeAt(i) + i, 0x85ebca6b) >>> 0;
+  }
+  return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
+}
+
+// =======================================================================
+// src/core/config.ts
+// =======================================================================
+/**
+ * HC-01 纯逻辑层 · 配置表注入
+ *
+ * ⚠️ 平衡期数值纪律（systems-index §7.1 / test-strategy §10）：
+ * 本文件 PLACEHOLDER_DEFAULTS 中的每一个数值都是**占位默认值**，仅为让确定性
+ * 模拟内核可运行、可单测；它们**不是平衡结论、也未经定稿**。口径统一为
+ * 「平衡期定，S-12 前钉定；由配置表注入」。模拟内核只读取 Config 字段，
+ * 不把这些数值硬编码进公式（S-02 验收 2 / TC-AC3-07）。
+ */
+
+
+
+                         
+         
+                        
+                 
+                   
+    
+                      
+                         
+            
+                             
+                   
+                                                       
+              
+                
+                  
+                
+                       
+                
+                                     
+                                                                  
+                
+                  
+                 
+                 
+                          
+                 
+              
+              
+                  
+                                                
+                
+                 
+                
+                
+                
+                 
+                 
+                 
+                 
+                  
+                
+                     
+             
+               
+                
+              
+                  
+                  
+                    
+                         
+                               
+                           
+                       
+                   
+ 
+
+/** 占位默认值：结构性中性值，仅用于可运行性，不代表任何平衡结论 */
+const PLACEHOLDER_DEFAULTS         = {
+  meta: {
+    kind: 'PLACEHOLDER',
+    note: '平衡期定，S-12 前钉定；由配置表注入。当前值仅为可运行占位，不是平衡结论。',
+    pinnedAt: null,
+  },
+  zoneTypes: ['R', 'C', 'I'],
+  K: 4,
+  S_unlock: 60,
+  T_0: 1,
+  T_max: 30,
+  T_s_max: 20,
+  E_max: 100,
+  i_ref: 10,
+  weights: { f_c: 0.25, f_s: 0.25, f_e: 0.25, f_f: 0.25 },
+  alpha: 0.5,
+  f_floor: 0.3,
+  lambda: 0.1,
+  f_init: 0.5,
+  p_unit: 1,
+  j_C: 1,
+  j_I: 1,
+  r_labor: 0.5,
+  densityCoefficients: [1, 1.8, 2.4],
+  i_unit: 1,
+  m_min: 0.5,
+  m_max: 1.5,
+  I_min: 1,
+  c_zone: 1,
+  c_road: 1,
+  m_zone: 0.1,
+  m_road: 0.1,
+  B_floor: -100,
+  B_cap: 1000,
+  v0: 1,
+  beta: 1,
+  gamma: 1,
+  cap: 10,
+  qcapMax: 4,
+  epsilon: 1e-9,
+  maxBlocks: 64,
+  attributionThreshold: 0,
+  unlockedSide: START_UNLOCKED_SIDE,
+  gridSide: MAX_GRID_SIDE,
+};
+
+function createDefaultConfig(overrides                  = {})         {
+  return {
+    ...PLACEHOLDER_DEFAULTS,
+    ...overrides,
+    meta: overrides.meta ?? PLACEHOLDER_DEFAULTS.meta,
+    weights: { ...PLACEHOLDER_DEFAULTS.weights, ...(overrides.weights ?? {}) },
+    densityCoefficients: overrides.densityCoefficients ?? [...PLACEHOLDER_DEFAULTS.densityCoefficients],
+    zoneTypes: overrides.zoneTypes ?? [...PLACEHOLDER_DEFAULTS.zoneTypes],
+  };
+}
+
+/** 配置内容哈希：任一字段变化必升 hash（S-02 验收 2 / ADR-003 R-6） */
+function computeConfigHash(config        )         {
+  return hashString(canonicalize(config));
+}
+
+function clamp(v        , lo        , hi        )         {
+  if (!Number.isFinite(v)) return lo;
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/** 除零保护：分母 <= eps 时走兜底，绝不产生 Infinity / NaN */
+function safeDiv(num        , den        , fallback        , eps        )         {
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= eps) return fallback;
+  const r = num / den;
+  return Number.isFinite(r) ? r : fallback;
+}
+
+/** 满意度聚合器（可注入；公式骨架来自 GDD 01 §4.2，参数全部来自 Config） */
+                                         
+                                                           
+                                                           
+                                               
+ 
+
+function createDefaultAggregator()                         {
+  const transform = (f        , config        )         =>
+    Math.pow(clamp(f, 0, 1), config.alpha);
+  const shortfall = (factors              , config        )         => {
+    let min = 1;
+    for (let i = 0; i < factors.length; i++) if (factors[i] < min) min = factors[i];
+    return clamp(safeDiv(config.f_floor - min, config.f_floor, 0, config.epsilon), 0, 1);
+  };
+  return {
+    transform,
+    shortfall,
+    aggregate(factors              , config        )         {
+      const w = config.weights;
+      const main =
+        w.f_c * transform(factors[0], config) +
+        w.f_s * transform(factors[1], config) +
+        w.f_e * transform(factors[2], config) +
+        w.f_f * transform(factors[3], config);
+      return clamp(100 * main * (1 - config.lambda * shortfall(factors, config)), 0, 100);
+    },
+  };
+}
+
+/**
+ * 冷启动基线满意度：由 f_init 与合成公式派生，避免与 S 公式不一致（GDD 01 E1）。
+ * S_init 不单独作为平衡数值写死。
+ */
+function computeBaselineS(config        )         {
+  const f = config.f_init;
+  const g = Math.pow(clamp(f, 0, 1), config.alpha);
+  const w = config.weights;
+  const main = (w.f_c + w.f_s + w.f_e + w.f_f) * g;
+  const L = clamp(safeDiv(config.f_floor - f, config.f_floor, 0, config.epsilon), 0, 1);
+  return clamp(100 * main * (1 - config.lambda * L), 0, 100);
+}
+
+/** 版本不匹配时拒绝续算，禁止静默用新公式（ADR-003 A3 / SM-W4-03） */
+function assertConfigCompatible(state           , config        )       {
+  if (state.schemaVersion !== SCHEMA_VERSION) {
+    throw new ConfigMismatchError(`schemaVersion ${state.schemaVersion} != ${SCHEMA_VERSION}`);
+  }
+  const expected = computeConfigHash(config);
+  if (state.configHash !== expected) {
+    throw new ConfigMismatchError('configHash mismatch; explicit migration required');
+  }
+}
+
+// =======================================================================
+// src/core/schema.ts
+// =======================================================================
+/**
+ * HC-01 纯逻辑层 · 网格 / 分区 / 状态 schema
+ *
+ * 数据层零引擎 / 零平台依赖；Cell 为唯一权威地块状态（GDD 02 §3.3）。
+ * 分区类型由 config.zoneTypes 驱动（3 类 MVP 激活集 + 可扩展预留），
+ * 增 / 减分区不改动本文件（S-02 验收 3 / X-2 兼容预留）。
+ */
+
+
+
+
+function assertGridSide(side        )       {
+  if (!Number.isInteger(side) || side <= 0 || side > MAX_GRID_SIDE) {
+    throw new GridLimitExceededError(side);
+  }
+}
+
+function cellIndex(side        , x        , y        )         {
+  return y * side + x;
+}
+
+/** 内建 0=EMPTY / 1=ROAD；2..N 由 config.zoneTypes 顺序生成；未知返回 -1 */
+function zoneIndex(config        , zoneId        )         {
+  if (zoneId === 'EMPTY') return ZONE_EMPTY_INDEX;
+  if (zoneId === 'ROAD') return ZONE_ROAD_INDEX;
+  const i = config.zoneTypes.indexOf(zoneId);
+  return i < 0 ? -1 : i + 2;
+}
+
+function zoneId(config        , index        )         {
+  if (index === ZONE_EMPTY_INDEX) return 'EMPTY';
+  if (index === ZONE_ROAD_INDEX) return 'ROAD';
+  const i = index - 2;
+  return i >= 0 && i < config.zoneTypes.length ? config.zoneTypes[i] : 'UNKNOWN';
+}
+
+function isBuiltinZone(index        )          {
+  return index === ZONE_EMPTY_INDEX || index === ZONE_ROAD_INDEX;
+}
+
+function createFrame()        {
+  return {
+    S: 0,
+    factors: new Float64Array(4),
+    T_c: 0,
+    T_s: 0,
+    E: 0,
+    I_f: 0,
+    dS: 0,
+    dSByFactor: new Float64Array(4),
+    dSPenalty: 0,
+    L: 0,
+  };
+}
+
+function copyFrame(src       , dst       )       {
+  dst.S = src.S;
+  dst.factors.set(src.factors);
+  dst.T_c = src.T_c;
+  dst.T_s = src.T_s;
+  dst.E = src.E;
+  dst.I_f = src.I_f;
+  dst.dS = src.dS;
+  dst.dSByFactor.set(src.dSByFactor);
+  dst.dSPenalty = src.dSPenalty;
+  dst.L = src.L;
+}
+
+                                      
+                
+                        
+ 
+
+function createInitialState(config        , options                      = {})            {
+  const side = options.side ?? config.gridSide;
+  assertGridSide(side);
+  const unlockedSide = options.unlockedSide ?? config.unlockedSide;
+  const count = side * side;
+
+  const cells             = {
+    zone: new Uint8Array(count),
+    density: new Uint8Array(count),
+    unlocked: new Uint8Array(count),
+    region: new Uint8Array(count),
+    inputVersion: new Uint32Array(count),
+  };
+
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const i = cellIndex(side, x, y);
+      const inside = x < unlockedSide && y < unlockedSide;
+      cells.unlocked[i] = inside ? 1 : 0;
+      cells.region[i] = inside ? 0 : 1;
+      cells.zone[i] = ZONE_EMPTY_INDEX;
+      cells.density[i] = DENSITY_NONE;
+    }
+  }
+
+  const baselineS = computeBaselineS(config);
+  const prev = createFrame();
+  const current = createFrame();
+  for (const f of [prev, current]) {
+    f.S = baselineS;
+    for (let i = 0; i < 4; i++) f.factors[i] = config.f_init;
+    f.I_f = 0;
+    f.L = 0;
+  }
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    configHash: computeConfigHash(config),
+    engineVersion: ENGINE_VERSION,
+    seed: 0,
+    side,
+    cells,
+    tickId: 0,
+    cycleId: 0,
+    cycleTickIndex: 0,
+    budget: {
+      B: 0,
+      C_b_accum: 0,
+      C_m_accum: 0,
+      I_f_current: 0,
+      I_f_lagged: 0,
+      I_t: 0,
+      C_m_last: 0,
+    },
+    frames: { prev, current },
+    issueCount: 2,
+    unlockedRegions: 1,
+  };
+}
+
+/** 原地深拷贝（用于 workspace.stateScratch，热路径不新建对象） */
+function copyState(src           , dst           )       {
+  dst.schemaVersion = src.schemaVersion;
+  dst.configHash = src.configHash;
+  dst.engineVersion = src.engineVersion;
+  dst.seed = src.seed;
+  dst.side = src.side;
+  dst.cells.zone.set(src.cells.zone);
+  dst.cells.density.set(src.cells.density);
+  dst.cells.unlocked.set(src.cells.unlocked);
+  dst.cells.region.set(src.cells.region);
+  dst.cells.inputVersion.set(src.cells.inputVersion);
+  dst.tickId = src.tickId;
+  dst.cycleId = src.cycleId;
+  dst.cycleTickIndex = src.cycleTickIndex;
+  dst.budget.B = src.budget.B;
+  dst.budget.C_b_accum = src.budget.C_b_accum;
+  dst.budget.C_m_accum = src.budget.C_m_accum;
+  dst.budget.I_f_current = src.budget.I_f_current;
+  dst.budget.I_f_lagged = src.budget.I_f_lagged;
+  dst.budget.I_t = src.budget.I_t;
+  dst.budget.C_m_last = src.budget.C_m_last;
+  copyFrame(src.frames.prev, dst.frames.prev);
+  copyFrame(src.frames.current, dst.frames.current);
+  dst.issueCount = src.issueCount;
+  dst.unlockedRegions = src.unlockedRegions;
+}
+
+                                  
+                        
+                     
+                        
+               
+               
+          
+                   
+                      
+                       
+                     
+                           
+    
+                 
+                  
+                         
+                              
+                                                              
+                     
+                          
+ 
+
+                           
+            
+                    
+              
+              
+            
+              
+             
+                       
+                    
+            
+ 
+
+function frameToPlain(f       )                  {
+  return {
+    S: f.S,
+    factors: Array.from(f.factors),
+    T_c: f.T_c,
+    T_s: f.T_s,
+    E: f.E,
+    I_f: f.I_f,
+    dS: f.dS,
+    dSByFactor: Array.from(f.dSByFactor),
+    dSPenalty: f.dSPenalty,
+    L: f.L,
+  };
+}
+
+function plainToFrame(p                 )        {
+  const f = createFrame();
+  f.S = p.S;
+  f.factors.set(p.factors);
+  f.T_c = p.T_c;
+  f.T_s = p.T_s;
+  f.E = p.E;
+  f.I_f = p.I_f;
+  f.dS = p.dS;
+  f.dSByFactor.set(p.dSByFactor);
+  f.dSPenalty = p.dSPenalty;
+  f.L = p.L;
+  return f;
+}
+
+function serializeState(state           )                  {
+  return {
+    schemaVersion: state.schemaVersion,
+    configHash: state.configHash,
+    engineVersion: state.engineVersion,
+    seed: state.seed,
+    side: state.side,
+    cells: {
+      zone: Array.from(state.cells.zone),
+      density: Array.from(state.cells.density),
+      unlocked: Array.from(state.cells.unlocked),
+      region: Array.from(state.cells.region),
+      inputVersion: Array.from(state.cells.inputVersion),
+    },
+    tickId: state.tickId,
+    cycleId: state.cycleId,
+    cycleTickIndex: state.cycleTickIndex,
+    budget: { ...state.budget },
+    frames: {
+      prev: frameToPlain(state.frames.prev),
+      current: frameToPlain(state.frames.current),
+    },
+    issueCount: state.issueCount,
+    unlockedRegions: state.unlockedRegions,
+  };
+}
+
+/**
+ * 反序列化存档 / 快照（D-01 修复，T-116）：
+ * `config` 为实参，载入后强制 `assertConfigCompatible`——
+ * schemaVersion / configHash 任一不匹配即抛 `ConfigMismatchError`，
+ * 禁止旧存档在新配置下静默续算（ADR-003 A3 / SM-W1-02）。
+ * 显式迁移须走未来的 S-10 migrate() 路径，不经本函数绕行。
+ */
+function deserializeState(raw                 , config        )            {
+  assertGridSide(raw.side);
+  const side = raw.side;
+  const count = side * side;
+  const cells             = {
+    zone: Uint8Array.from(raw.cells.zone),
+    density: Uint8Array.from(raw.cells.density),
+    unlocked: Uint8Array.from(raw.cells.unlocked),
+    region: Uint8Array.from(raw.cells.region),
+    inputVersion: Uint32Array.from(raw.cells.inputVersion),
+  };
+  // 长度防御：不静默接受残缺数据
+  if (cells.zone.length !== count) throw new GridLimitExceededError(side);
+  const state            = {
+    schemaVersion: raw.schemaVersion,
+    configHash: raw.configHash,
+    engineVersion: raw.engineVersion,
+    seed: raw.seed,
+    side,
+    cells,
+    tickId: raw.tickId,
+    cycleId: raw.cycleId,
+    cycleTickIndex: raw.cycleTickIndex,
+    budget: { ...raw.budget },
+    frames: {
+      prev: plainToFrame(raw.frames.prev),
+      current: plainToFrame(raw.frames.current),
+    },
+    issueCount: raw.issueCount,
+    unlockedRegions: raw.unlockedRegions,
+  };
+  // D-01（T-116）：载入即断言，不匹配即拒绝（无静默续算）
+  assertConfigCompatible(state, config);
+  return state;
+}
+
+// =======================================================================
+// src/render/iso.ts
+// =======================================================================
+/**
+ * HC-01 · 渲染内核 · 2:1 dimetric 等距投影与深度排序（S-06）
+ *
+ * 权威口径（只读引用，不得自造）：
+ * - art-bible §2.1：2:1 dimetric，单格 128×64 @1x，全项目锁死单一角度、正交投影、
+ *   不提供旋转、不做多朝向资产；等距遮挡统一按 Y 轴（屏幕纵向）深度排序，
+ *   **禁止逐对象手写 zIndex 例外**。
+ * - art-bible §2.2：仅三个固定缩放档位 L0 0.5× / L1 1.0×（默认操作层）/ L2 2.0×，
+ *   不做连续缩放、不做角度插值。
+ *
+ * 约定：
+ * - `gridToScreen` 以菱形**顶角**为锚点：screen.x = (gx−gy)·64，screen.y = (gx+gy)·32。
+ * - 本文件零引擎依赖（不 import 'cc'）、零平台依赖，可 node:test 直接验证。
+ * - 渲染层每帧可分配（不受模拟热路径零分配约束），但本文件自身仍走纯函数。
+ */
+
+const CELL_W = 128;
+const CELL_H = 64;
+const HALF_W = CELL_W / 2;
+const HALF_H = CELL_H / 2;
+
+                        
+            
+            
+ 
+
+                                          
+
+/** art-bible §2.2：只允许三个固定档位，不做连续缩放 / 角度插值 */
+const LOD_LEVELS                      = ['L0', 'L1', 'L2'];
+
+const ZOOM                                     = { L0: 0.5, L1: 1.0, L2: 2.0 };
+
+function zoomScale(lod          )         {
+  return ZOOM[lod];
+}
+
+/** 网格坐标 → 屏幕坐标（菱形顶角为锚点；2:1 斜率由此结构保证） */
+function gridToScreen(gx        , gy        )        {
+  return { x: (gx - gy) * HALF_W, y: (gx + gy) * HALF_H };
+}
+
+/**
+ * 屏幕坐标 → 网格浮点坐标（`gridToScreen` 的严格逆变换，往返误差 < 1e-9）。
+ * 注意：该函数返回的坐标**不是**格索引；格索引用 `pickCell`。
+ */
+function screenToGrid(px        , py        )        {
+  const u = px / HALF_W;
+  const v = py / HALF_H;
+  return { x: (u + v) / 2, y: (v - u) / 2 };
+}
+
+                           
+             
+             
+ 
+
+/**
+ * 屏幕点拾取格索引（点击命中）。
+ * 菱形锚点在顶角时，格内连续坐标覆盖 [g0, g0+1) × [g0, g0+1)，
+ * 因此直接对 `screenToGrid` 结果取 floor。共享边 / 顶点处的平局按 floor
+ * 归给「右下」侧格（确定性，无随机）。
+ */
+function pickCell(px        , py        )           {
+  const g = screenToGrid(px, py);
+  return { gx: Math.floor(g.x), gy: Math.floor(g.y) };
+}
+
+/**
+ * 深度键：**唯一**的深度规则（无 zIndex 例外）。
+ * 先按 gx+gy 升序（屏幕越靠下越后绘制 → 覆盖上方），平局再按 gx 升序，
+ * 保证同一 (gx+gy) 的对角线上顺序确定、可回放、无随机。
+ * 返回单调可比较的整数键（供只接受 number 的引擎侧排序 / setSiblingIndex 使用）。
+ */
+function depthKey(gx        , gy        )         {
+  const sum = gx + gy;
+  return sum * 4096 + gx; // side ≤ 32 时 gx < 4096，键严格单调
+}
+
+                           
+             
+             
+ 
+
+/** 深度比较器（升序 = 从远（上）到近（下）绘制）；返回 -1 / 0 / 1 */
+function compareDepth(a          , b          )         {
+  const sa = a.gx + a.gy;
+  const sb = b.gx + b.gy;
+  if (sa !== sb) return sa < sb ? -1 : 1;
+  if (a.gx !== b.gx) return a.gx < b.gx ? -1 : 1;
+  return 0;
+}
+
+/**
+ * 固定档位缩放的锚点保持：把 `fromLod` 下的屏幕点 `p` 映射到 `toLod`，
+ * 使屏幕上的 `anchor` 点保持不动（锚点缩放，非连续缩放——档位切换时一次性换算）。
+ */
+function zoomAround(point       , anchor       , fromLod          , toLod          )        {
+  const k = zoomScale(toLod) / zoomScale(fromLod);
+  return {
+    x: anchor.x + (point.x - anchor.x) * k,
+    y: anchor.y + (point.y - anchor.y) * k,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 世界包围盒与视口居中（T-121 P-01：预览页地图被裁 / 不居中的根因治理）
+// ---------------------------------------------------------------------------
+
+                              
+               
+               
+               
+               
+ 
+
+/**
+ * 网格的世界包围盒（菱形**四角**参与计算，而非仅锚点）：
+ * 格 (gx,gy) 顶角 (cx,cy) = gridToScreen，菱形左/右 ±64、下缘 +64。
+ * `isUnlocked` 缺省视为全部格参与（全图概览用）。
+ */
+function cellWorldBounds(side        , isUnlocked                                      )              {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let gy = 0; gy < side; gy++) {
+    for (let gx = 0; gx < side; gx++) {
+      if (isUnlocked !== undefined && !isUnlocked(gx, gy)) continue;
+      const p = gridToScreen(gx, gy);
+      if (p.x - HALF_W < minX) minX = p.x - HALF_W;
+      if (p.x + HALF_W > maxX) maxX = p.x + HALF_W;
+      if (p.y < minY) minY = p.y;
+      if (p.y + CELL_H > maxY) maxY = p.y + CELL_H;
+    }
+  }
+  if (!Number.isFinite(minX)) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  return { minX, maxX, minY, maxY };
+}
+
+                                
+               
+             
+             
+                                        
+                       
+                       
+ 
+
+/**
+ * 按**世界包围盒中心**与固定档位生成 2D 变换（t = translate · scale）：
+ * `screen = world * zoom + t`。同一 bounds 下不同档位的 `worldCenter` 相同，
+ * 因此切档等价于「以视口中心为锚点调用 `zoomAround`」——L1/L2 局部放大属预期裁切。
+ */
+function fitTransform(bounds             , viewportW        , viewportH        , lod          )                {
+  const zoom = zoomScale(lod);
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cy = (bounds.minY + bounds.maxY) / 2;
+  return { zoom, tx: viewportW / 2 - zoom * cx, ty: viewportH / 2 - zoom * cy, worldCenterX: cx, worldCenterY: cy };
+}
+
+function worldToScreen(p       , t               )        {
+  return { x: p.x * t.zoom + t.tx, y: p.y * t.zoom + t.ty };
+}
+
+function screenToWorldPoint(p       , t               )        {
+  return { x: (p.x - t.tx) / t.zoom, y: (p.y - t.ty) / t.zoom };
+}
+
+/** 包围盒是否完整落在视口内（用于「概览是否全图可见」断言） */
+function fitsInViewport(bounds             , t               , viewportW        , viewportH        , margin = 0)          {
+  const tl = worldToScreen({ x: bounds.minX, y: bounds.minY }, t);
+  const br = worldToScreen({ x: bounds.maxX, y: bounds.maxY }, t);
+  return tl.x >= margin && tl.y >= margin && br.x <= viewportW - margin && br.y <= viewportH - margin;
+}
+
+// =======================================================================
+// src/render/view-model.ts
+// =======================================================================
+/**
+ * HC-01 · 渲染内核 · 只读视图模型（S-06）
+ *
+ * 权威口径：ADR-004 §2 —— UI 与渲染只持有**只读 VM**，绝不写权威状态；
+ * 渲染帧不触发模拟（OD-2 A 主动推进制：只有「结束本日」推进 tick）。
+ *
+ * 零拷贝策略（诚实标注）：
+ * - `cells.*` 的 TypedArray 引用**直接共享**，不做防御性拷贝（每帧 5×1024 拷贝无意义）；
+ * - **唯一复制项** = `changeStamp`（`inputVersion` 的 4KB 快照）。原因：内核 P1 写格时
+ *   `inputVersion` 自增，且 `runTick` 复用同一 `stateScratch`（相邻 tick 的 cells 数组是
+ *   同一引用）。若 diff 直接比对引用，同引用下永远无差异 → 必须留一份「上一帧版本戳」。
+ * - 因此「只读」由三层守护共同保证，而非运行时不变量：
+ *   ① 类型层：VM 字段全部 `readonly`，且不暴露 `CityState` 本体；
+ *   ② 结构层：VM 与嵌套 cells 视图 `Object.freeze`（写入属性即抛错 / 静默失败）；
+ *   ③ 证据层：`render-viewmodel.test.ts` 用 `canonicalize(state)` 指纹证明
+ *      buildViewModel / diffViewModel 调用前后状态逐字节不变，并对 `src/render/`
+ *      做「无写 state 路径」静态扫描。
+ * - 若未来需要运行级不可写，可在 VM 前加一层 Proxy 或改用 SharedArrayBuffer 只读视图，
+ *   本轮不做（性能与复杂度不划算）。
+ */
+
+                                                  
+
+
+/** 只读单元格视图（TypedArray 引用共享；见文件头零拷贝策略） */
+                            
+                            
+                               
+                                
+                              
+                                     
+ 
+
+                              
+                       
+                       
+                       
+                       
+ 
+
+                             
+                     
+                       
+                              
+                            
+ 
+
+/** 渲染层唯一数据来源（只读；不持有可写 state 引用） */
+                                  
+                        
+                          
+                           
+                                  
+                              
+                                   
+                     
+                                
+                              
+                            
+                                                       
+                                    
+                                          
+                               
+ 
+
+/**
+ * 从权威状态投影出只读 VM。不复制大数组、不暴露可写引用、不产生任何副作用。
+ * 调用后 `canonicalize(state)` 必须与调用前逐字节一致（用例断言）。
+ */
+function buildViewModel(state           )                  {
+  const cur = state.frames.current;
+  const cells            = Object.freeze({
+    zone: state.cells.zone,
+    density: state.cells.density,
+    unlocked: state.cells.unlocked,
+    region: state.cells.region,
+    inputVersion: state.cells.inputVersion,
+  });
+  const factors              = Object.freeze({
+    f_c: cur.factors[0],
+    f_s: cur.factors[1],
+    f_e: cur.factors[2],
+    f_f: cur.factors[3],
+  });
+  const budget             = Object.freeze({
+    B: state.budget.B,
+    I_t: state.budget.I_t,
+    I_f_lagged: state.budget.I_f_lagged,
+    C_m_last: state.budget.C_m_last,
+  });
+  const vm                  = {
+    side: state.side,
+    tickId: state.tickId,
+    cycleId: state.cycleId,
+    cycleTickIndex: state.cycleTickIndex,
+    issueCount: state.issueCount,
+    unlockedRegions: state.unlockedRegions,
+    S: cur.S,
+    factors,
+    budget,
+    cells,
+    changeStamp: new Uint32Array(state.cells.inputVersion),
+    fingerprint: canonicalize(state),
+  };
+  return Object.freeze(vm);
+}
+
+/**
+ * 渲染差分：输出需要重绘的格索引（升序）。
+ *
+ * ⚠️ **只产「格级」信号**（D-08 / T-121 文档化）：本函数只比较 `changeStamp`
+ * （`inputVersion` 快照）与兜底的 zone / density / unlocked，**不覆盖** `S` / `tickId` /
+ * `cycleId` / `budget` 等非格字段。这些字段变化（如 P4 满意度、P7 预算结算）时本函数
+ * 可能返回空数组——消费方须自行比对 `vm.S` / `vm.tickId` / `vm.budget`，或直接全量重建
+ * 绘制列表。渲染层不监听模拟事件，也不因非格字段变化而重绘地块。
+ *
+ * 主信号 = `changeStamp`（P1 写格必 bump `inputVersion`，见内核 P1）。
+ * 兜底：当两个 VM 的 cells 指向**不同**底层数组（不同 state 对象）时，再比对
+ * zone / density / unlocked，防止上游未 bump 版本时漏更新。
+ * 注意：同一 state 对象被就地改写而不 bump inputVersion 时不可检出——这是与内核的
+ * 显式契约（P1 每次都 bump），已由 `render-viewmodel.test.ts` 钉为对应用例。
+ */
+function diffViewModel(prev                 , next                 )           {
+  const out           = [];
+  if (prev.side !== next.side) {
+    const n = next.side * next.side;
+    for (let i = 0; i < n; i++) out.push(i);
+    return out;
+  }
+  const count = next.side * next.side;
+  const pv = prev.changeStamp;
+  const nv = next.changeStamp;
+  const distinctBacking = prev.cells.zone !== next.cells.zone;
+  const pz = prev.cells.zone;
+  const nz = next.cells.zone;
+  const pd = prev.cells.density;
+  const nd = next.cells.density;
+  const pu = prev.cells.unlocked;
+  const nu = next.cells.unlocked;
+  for (let i = 0; i < count; i++) {
+    let changed = pv[i] !== nv[i];
+    if (!changed && distinctBacking) {
+      changed = pz[i] !== nz[i] || pd[i] !== nd[i] || pu[i] !== nu[i];
+    }
+    if (changed) out.push(i);
+  }
+  return out;
+}
+
+/** 便捷：格索引 → (gx, gy)（side 由 VM 携带，避免调用方重复传参） */
+function cellIndexToGrid(side        , index        )                             {
+  return { gx: index % side, gy: Math.floor(index / side) };
+}
+
+/** 诊断用：VM 与 cells 视图是否已冻结（结构层只读证据，用例断言） */
+function isViewModelFrozen(vm                 )          {
+  return Object.isFrozen(vm) && Object.isFrozen(vm.cells) && Object.isFrozen(vm.factors) && Object.isFrozen(vm.budget);
+}
+
+// =======================================================================
+// src/render/semantic-tokens.ts
+// =======================================================================
+/**
+ * HC-01 · 渲染内核 · 语义令牌映射（SemanticTokenMap，S-06）
+ *
+ * 权威口径（只读引用）：
+ * - architecture.md §9.1（M14）：分区 / 状态先输出**语义令牌**（`zone.residential`、
+ *   `status.congested`…），由 `SemanticTokenMap` 统一映射为「色值 + 图案 + 形状 +
+ *   文字标签 + 对比度」；全项目色值集中色板，**禁止贴图内硬编码近似色**。
+ * - art-bible §3.2：MVP 3 类分区色值 + 图案编码；§3.3 通勤流量色；§3.4 状态色与
+ *   四重隔离（状态色不得复用 / 衍生分区色，形状不得借分区图案，**任一状态「色 + 形状」
+ *   两维可区分**）；§3.5 配色纪律（分区组与状态组互不引用）；§9.2 双通道 + 高对比模式
+ *   （图案不透明度 12–18% → 高对比 30% + 1px 深色描边，asset-spec M-093）。
+ *
+ * ⚠️ 纪律：**全项目十六进制色值只允许出现在本文件**。其他 render 模块若出现
+ * `#rrggbb` / `#rgb` / `0xRRGGBB` / `rgb()` / `hsl()` / 拼色字面量即判失败
+ * （`tests/unit/render-tokens.test.ts` 与 QA 复核套件静态扫描断言）。
+ * 渲染 / UI 侧只能按令牌 id 取色，不得在绘制代码里写色值。
+ *
+ * T-121 修复（art-director A-02 / A-05 / A-07 / A-08）：
+ * - A-02：(color, shape) 组合**全局唯一**。通勤三态从 `status.*` 移除、只保留
+ *   `flow.*`（clear=✓ / slow=↑ / congested=↓），事件态为 positive=✓ / warning=! /
+ *   negative=✕ / disabled=锁。同色不同形状 → 同屏可区分且不新增色值。
+ * - A-05：图案不透明度提为配置（`PATTERN_ALPHA` 0.18 / 高对比 0.30 +
+ *   `HIGH_CONTRAST_INK_OUTLINE_WIDTH`），`highContrast` 开关入参，**默认关闭、视觉不变**。
+ * - A-07：同一语义色**只定义一个 hex 字面量**（`SEMANTIC` 常量是唯一出处），
+ *   消除此前 clear/slow/congested 在两组内重复定义。
+ * - A-08：令牌补 `inkOnDark`（深底用浅墨）；状态色为 L40–50 深底，叠字须用浅墨。
+ */
+
+                                         
+
+/** 分区图案编码（art-bible §3.2；仅允许这 6 种 + none） */
+                                                                                                                
+
+/** 状态形状编码（art-bible §3.4：✓ / ! / ✕ / 锁 / ↑ / ↓ / 三角 / 横杠；**禁借分区图案**） */
+                                                                                                                                
+
+                               
+                                     
+                
+                                                          
+                    
+ 
+
+                                
+             
+                                             
+                         
+                
+                       
+                     
+                                              
+                
+                         
+                                                 
+              
+                                         
+                    
+ 
+
+                                   
+                                                         
+                        
+                                                          
+                                           
+                                                           
+                                           
+                                                         
+                                                         
+                                        
+                                
+                                          
+                                            
+                              
+                                          
+                                 
+ 
+
+// ---------------------------------------------------------------------------
+// 色板（**唯一** hex 来源；分组隔离见 art-bible §3.5）
+// ---------------------------------------------------------------------------
+
+/** 基底与品牌色（art-bible §3.1） */
+const BASE = {
+  canvas: '#F4F6F8', // 画布 / 地面 · 混凝土白
+  tileBase: '#E8ECEF', // 地块基色 · 浅冷灰
+  panel: '#F7F8FA', // 面板底 · 灰蓝白
+  divider: '#DCE2E8', // 分隔线 · 淡灰蓝
+  primary: '#2E6BE6', // 主色 · 市政蓝（仅经 status.selected 令牌出口，不单列 base 令牌，避免 (color,shape) 重复）
+  primaryDark: '#1B4FC0',
+  primaryLight: '#E8F0FF',
+  accent: '#F59E23',
+  inkPrimary: '#1B2430',
+  inkSecondary: '#5A6675',
+  inkWeak: '#9AA5B1',
+}         ;
+
+/**
+ * 状态语义色（art-bible §3.4 / §3.3）——**每个 hex 只在此定义一次**（A-07）。
+ * 事件态与通勤态共用色值（§3.3 允许），但形状不同以保「色 + 形状」二维可辨（A-02）。
+ */
+const SEMANTIC = {
+  positive: '#0B7A4B', // 正向 / 满足 / 可用
+  warning: '#A85C00', // 提示 / 警告 · 亦通勤「缓行」
+  negative: '#C0261D', // 负向 / 拥堵 / 不满 · 亦通勤「拥堵」
+  disabled: '#B8C0C8', // 禁用 / 未解锁（中性，不占色相）
+  selected: BASE.primary, // 选中 / 焦点
+  clear: '#5B7A8C', // 通勤「畅通」（中性灰蓝）
+}         ;
+
+/** 分区组（art-bible §3.2；低饱和 L≈70–80，只用于填充；异于状态 / 流线色） */
+const ZONE_COLORS                                   = {
+  R: '#A8BE72', // 居住 · 暖琥珀绿
+  C: '#4C96C9', // 商业 · 青蓝
+  I: '#C08A62', // 产业 · 橙灰
+  CIVIC: '#7B78C4', // 公共服务（Should）· 靛紫
+  PARK: '#2E9E7B', // 绿地（Could 变体）· 青绿
+  OFFICE: '#9B8AD9', // 商务（Could 变体）· 紫
+};
+
+const ZONE_PATTERN                                                                    = {
+  R: { pattern: 'dots', label: '居住' },
+  C: { pattern: 'diagonal-45', label: '商业' },
+  I: { pattern: 'grid-lines', label: '产业' },
+  CIVIC: { pattern: 'cross', label: '公共服务' },
+  PARK: { pattern: 'canopy', label: '绿地' },
+  OFFICE: { pattern: 'vertical-bars', label: '商务' },
+};
+
+/**
+ * 事件 / 交互状态（**(color, shape) 组合全局唯一**——A-02）。
+ * 形状取自 art-bible §3.4 白名单，绝不使用分区图案。
+ */
+const STATUS_SHAPE                                                                                 = {
+  positive: { color: SEMANTIC.positive, shape: 'check', label: '正向 / 满足 / 可用' },
+  warning: { color: SEMANTIC.warning, shape: 'exclamation', label: '提示 / 警告' },
+  negative: { color: SEMANTIC.negative, shape: 'cross', label: '负向 / 拥堵 / 不满' },
+  disabled: { color: SEMANTIC.disabled, shape: 'lock', label: '禁用 / 未解锁' },
+  selected: { color: SEMANTIC.selected, shape: 'none', label: '选中 / 焦点（2px 描边 + 光晕）' },
+};
+
+/**
+ * 通勤流量叠加层（art-bible §3.3）：同色不同形状，与事件态可区分（A-02）。
+ * clear=✓ / slow=↑ / congested=↓ —— 与 positive=✓ 同形不同色、与 warning=!/negative=✕ 同色不同形。
+ */
+const FLOW_SHAPE                                                                                 = {
+  clear: { color: SEMANTIC.clear, shape: 'check', label: '通勤畅通（细线 + 低亮度）' },
+  slow: { color: SEMANTIC.warning, shape: 'arrow-up', label: '通勤缓行（线宽加粗 + 亮度提升）' },
+  congested: { color: SEMANTIC.negative, shape: 'arrow-down', label: '通勤拥堵（最粗 + 最高亮度 + 脉冲）' },
+};
+
+// ---------------------------------------------------------------------------
+// 图案不透明度（A-05：高对比模式预留，默认关闭、视觉不变）
+// ---------------------------------------------------------------------------
+
+/** 常规图案不透明度（art-bible §3.2：12–18%，取上界 18%） */
+const PATTERN_ALPHA = 0.18;
+/** 高对比模式图案不透明度（asset-spec M-093 / art-bible §3.2：30%） */
+const HIGH_CONTRAST_PATTERN_ALPHA = 0.3;
+/** 高对比模式图案描边宽度（1px 深色描边） */
+const HIGH_CONTRAST_INK_OUTLINE_WIDTH = 1;
+
+function patternAlphaFor(highContrast         )         {
+  return highContrast ? HIGH_CONTRAST_PATTERN_ALPHA : PATTERN_ALPHA;
+}
+
+                                       
+                                              
+                         
+     
+                                           
+                                                  
+     
+                 
+ 
+
+// ---------------------------------------------------------------------------
+// WCAG 对比度（零依赖实现；art-bible §3.5：正文 ≥4.5:1，图标 / 组件 ≥3:1）
+// ---------------------------------------------------------------------------
+
+function hexToRgb(hex        )                                      {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.slice(0, 2), 16) / 255,
+    g: parseInt(h.slice(2, 4), 16) / 255,
+    b: parseInt(h.slice(4, 6), 16) / 255,
+  };
+}
+
+function channelLuminance(c        )         {
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function relativeLuminance(hex        )         {
+  const { r, g, b } = hexToRgb(hex);
+  return 0.2126 * channelLuminance(r) + 0.7152 * channelLuminance(g) + 0.0722 * channelLuminance(b);
+}
+
+/** WCAG 2.1 相对对比度（1~21） */
+function contrastRatio(hexA        , hexB        )         {
+  const la = relativeLuminance(hexA);
+  const lb = relativeLuminance(hexB);
+  const hi = Math.max(la, lb);
+  const lo = Math.min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** 图标 / UI 组件 / 大字的 AA 门槛（art-bible §3.5 = 3:1） */
+const AA_UI_THRESHOLD = 3;
+
+function contrastOf(color        )               {
+  const ratio = contrastRatio(color, BASE.canvas);
+  return { ratio, passesAA: ratio >= AA_UI_THRESHOLD };
+}
+
+function makeToken(
+  id        ,
+  group                        ,
+  color        ,
+  pattern             ,
+  shape             ,
+  label        ,
+)                {
+  // 浅底（base / zone）叠深墨；深底（status / flow，L≈40–50）叠浅墨（A-08）
+  const onDark = group === 'status' || group === 'flow';
+  return {
+    id,
+    group,
+    color,
+    pattern,
+    shape,
+    label,
+    contrast: contrastOf(color),
+    ink: onDark ? BASE.canvas : BASE.inkPrimary,
+    inkOnDark: BASE.canvas,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 令牌映射表
+// ---------------------------------------------------------------------------
+
+/**
+ * 按 `config.zoneTypes` 动态生成 `zone.*` 令牌（增 / 减分区不改渲染代码）。
+ * 未知分区类型走中性兜底（地块基色 + `none` 图案 + 原 id 作标签），
+ * 不静默借用分区色、也不借用状态色（保持 §3.4 隔离）。
+ */
+function buildSemanticTokenMap(zoneTypes                   , options                       = {})                   {
+  const highContrast = options.highContrast === true;
+  const base                                = {
+    'base.canvas': makeToken('base.canvas', 'base', BASE.canvas, 'none', 'none', '画布 / 地面'),
+    'base.tile': makeToken('base.tile', 'base', BASE.tileBase, 'none', 'none', '地块基色'),
+    'base.panel': makeToken('base.panel', 'base', BASE.panel, 'none', 'none', '面板底'),
+    'base.divider': makeToken('base.divider', 'base', BASE.divider, 'none', 'none', '分隔线'),
+    'base.ink': makeToken('base.ink', 'base', BASE.inkPrimary, 'none', 'none', '文字·主'),
+    'base.inkWeak': makeToken('base.inkWeak', 'base', BASE.inkWeak, 'none', 'none', '文字·弱'),
+  };
+
+  const zones                                = {};
+  for (let i = 0; i < zoneTypes.length; i++) {
+    const zoneId = zoneTypes[i];
+    const presetColor = ZONE_COLORS[zoneId];
+    const presetStyle = ZONE_PATTERN[zoneId];
+    const color = presetColor === undefined ? BASE.tileBase : presetColor;
+    const pattern              = presetStyle === undefined ? 'none' : presetStyle.pattern;
+    const label = presetStyle === undefined ? zoneId : presetStyle.label;
+    zones['zone.' + zoneId] = makeToken('zone.' + zoneId, 'zone', color, pattern, 'none', label);
+  }
+
+  const status                                = {};
+  const statusKeys = Object.keys(STATUS_SHAPE);
+  for (let i = 0; i < statusKeys.length; i++) {
+    const k = statusKeys[i];
+    const p = STATUS_SHAPE[k];
+    status['status.' + k] = makeToken('status.' + k, 'status', p.color, 'none', p.shape, p.label);
+  }
+
+  const flow                                = {};
+  const flowKeys = Object.keys(FLOW_SHAPE);
+  for (let i = 0; i < flowKeys.length; i++) {
+    const k = flowKeys[i];
+    const p = FLOW_SHAPE[k];
+    flow['flow.' + k] = makeToken('flow.' + k, 'flow', p.color, 'none', p.shape, p.label);
+  }
+
+  const byId                                = { ...base, ...zones, ...status, ...flow };
+  return Object.freeze({
+    base: Object.freeze(base),
+    zones: Object.freeze(zones),
+    status: Object.freeze(status),
+    flow: Object.freeze(flow),
+    byId: Object.freeze(byId),
+    patternAlpha: patternAlphaFor(highContrast),
+    highContrastPatternAlpha: HIGH_CONTRAST_PATTERN_ALPHA,
+    patternInkOutlineWidth: highContrast ? HIGH_CONTRAST_INK_OUTLINE_WIDTH : 0,
+    highContrast,
+  });
+}
+
+/** 取令牌；缺失即抛错（渲染层不允许静默兜底色值——色值只能来自本文件） */
+function tokenById(map                  , id        )                {
+  const t = map.byId[id];
+  if (t === undefined) throw new Error('unknown semantic token: ' + id);
+  return t;
+}
+
+/** 分区组全部色值（供「状态色 ∉ 分区色」隔离断言使用） */
+function zoneColorSet(map                  )                      {
+  const s = new Set        ();
+  const keys = Object.keys(map.zones);
+  for (let i = 0; i < keys.length; i++) s.add(map.zones[keys[i]].color);
+  return s;
+}
+
+/** 状态组（含通勤叠加层）全部色值（供隔离断言使用） */
+function statusColorSet(map                  )                      {
+  const s = new Set        ();
+  const groups = [map.status, map.flow];
+  for (let gi = 0; gi < groups.length; gi++) {
+    const keys = Object.keys(groups[gi]);
+    for (let i = 0; i < keys.length; i++) s.add(groups[gi][keys[i]].color);
+  }
+  return s;
+}
+
+// =======================================================================
+// src/render/atlas.ts
+// =======================================================================
+/**
+ * HC-01 · 渲染内核 · 虚拟图集清单与分包加载（S-06）
+ *
+ * 权威口径（只读引用）：
+ * - art-bible §9.3：图集 ≤2048×2048、留白 ≤10%、12 组划分（`UI` / `UI-图案编码` /
+ *   `地形地块` / `道路` / `建筑-居住` / `建筑-商业` / `建筑-产业` / `建筑-公共服务` /
+ *   `植被` / `VFX` / `昼夜窗光` / `天气`）；LOD 三档资产打入**同一图集**；
+ *   同屏同图集优先，避免跨图集交替打断合批。
+ * - asset-spec §0.2：图集画布固定 **2048×2048 = (128×16) × (64×32)**；UI 切片
+ *   24×24 / 48×48 @1x（**不套用世界网格基数**）；压缩 ASTC 首选 → ETC2 回退 →
+ *   不透明底 RGB565。
+ * - architecture.md §6.1：`UI` + `UI-图案编码` + 字体令牌**常驻不卸载**；
+ *   `地形地块` / `道路` / 网格线常驻（首屏）；`建筑-{分区}` **按激活分区集按需加载、
+ *   切 LOD 不卸载**；`VFX` / `昼夜窗光` / `天气` 按 LOD / 性能档。
+ *
+ * ⚠️ 占位声明：本清单的**尺寸全部为程序化占位规格，待真实切片替换**（本轮无任何 PNG；
+ * 图集为虚拟清单，不做实际打包）。留白以「切片透明边距比」建模（见 validateAtlasManifest）。
+ */
+
+                                         
+
+const ATLAS_SIZE = 2048;
+/** 2048² = (128×16) × (64×32) —— asset-spec §0.2 */
+const ATLAS_GRID_W = 128 * 16;
+const ATLAS_GRID_H = 64 * 32;
+
+const ATLAS_GROUPS = [
+  'UI',
+  'UI-图案编码',
+  '地形地块',
+  '道路',
+  '建筑-居住',
+  '建筑-商业',
+  '建筑-产业',
+  '建筑-公共服务',
+  '植被',
+  'VFX',
+  '昼夜窗光',
+  '天气',
+]         ;
+                                                    
+
+/** 分区 → 建筑图集（按激活分区集加载） */
+const ZONE_TO_ATLAS                                    = {
+  R: '建筑-居住',
+  C: '建筑-商业',
+  I: '建筑-产业',
+  CIVIC: '建筑-公共服务',
+};
+
+/** 常驻图集（architecture §6.1：UI / UI-图案编码 / 地形 / 道路 / 网格线） */
+const RESIDENT_ATLASES                     = ['UI', 'UI-图案编码', '地形地块', '道路'];
+
+/** UI 切片组（不套用世界网格 128×64 基数，asset-spec §0.2） */
+const UI_SLICE_GROUPS                       = new Set         (['UI', 'UI-图案编码']);
+
+                            
+            
+            
+            
+            
+ 
+
+                             
+                                    
+              
+                                              
+                   
+                   
+                        
+                  
+                                        
+                  
+                      
+                    
+                                                
+                     
+ 
+
+                             
+                   
+                     
+                                        
+                    
+                                            
+                       
+               
+               
+ 
+
+                                  
+              
+                            
+                                              
+ 
+
+/** 世界资产尺寸必须为 128×64 整数倍（art-bible §2.1 / asset-spec V-5） */
+function isWorldSizeValid(w        , h        )          {
+  return w > 0 && h > 0 && w % 128 === 0 && h % 64 === 0;
+}
+
+/** 简易货架打包（shelf packing）——仅用于占位清单布局，确定性、无随机 */
+function layoutGroup(items                                                           )               {
+  const out               = [];
+  let cursorX = 0;
+  let cursorY = 0;
+  let shelfHeight = 0;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.nonAtlas === true) {
+      // 非图集资产：不占图集空间、不参与合批
+      out.push({ assetKey: it.assetKey, key: it.key, atlasId: it.atlasId, lod: it.lod, rect: { x: 0, y: 0, w: 0, h: 0 }, padding: 0, nonAtlas: true });
+      continue;
+    }
+    if (cursorX + it.w > ATLAS_SIZE) {
+      cursorX = 0;
+      cursorY += shelfHeight;
+      shelfHeight = 0;
+    }
+    const entry             = {
+      assetKey: it.assetKey,
+      key: it.key,
+      atlasId: it.atlasId,
+      lod: it.lod,
+      rect: { x: cursorX, y: cursorY, w: it.w, h: it.h },
+      padding: it.padding ?? 0.06,
+    };
+    if (it.zoneGate !== undefined) entry.zoneGate = it.zoneGate;
+    out.push(entry);
+    cursorX += it.w;
+    if (it.h > shelfHeight) shelfHeight = it.h;
+  }
+  return out;
+}
+
+                    
+                   
+                        
+            
+            
+                   
+                    
+                     
+ 
+
+function spec(assetKey        , lod                  , w        , h        , zoneGate         )           {
+  return { assetKey, lod, w, h, padding: 0.06, zoneGate };
+}
+
+function withLods(assetKey        , w        , h        , zoneGate         )             {
+  return [spec(assetKey, 'L0', w, h, zoneGate), spec(assetKey, 'L1', w, h, zoneGate), spec(assetKey, 'L2', w, h, zoneGate)];
+}
+
+function groupItems(atlasId         )             {
+  switch (atlasId) {
+    case 'UI':
+      return [
+        { assetKey: 'ui_panel_9slice', lod: 'ALL', w: 48, h: 48, padding: 0.04 },
+        { assetKey: 'ui_button_9slice', lod: 'ALL', w: 48, h: 48, padding: 0.04 },
+        { assetKey: 'ui_tab_9slice', lod: 'ALL', w: 48, h: 48, padding: 0.04 },
+        { assetKey: 'ui_icon_zone_R', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_icon_zone_C', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_icon_zone_I', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_icon_road', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_icon_endday', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_shape_check', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_shape_exclamation', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_shape_cross', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_shape_lock', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_shape_arrow_up', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        { assetKey: 'ui_shape_arrow_down', lod: 'ALL', w: 24, h: 24, padding: 0.02 },
+        // 非图集资产：字体令牌与 App 图标不进合批链
+        { assetKey: 'font_token_main', lod: 'ALL', w: 0, h: 0, nonAtlas: true },
+        { assetKey: 'app_icon', lod: 'ALL', w: 0, h: 0, nonAtlas: true },
+      ];
+    case 'UI-图案编码':
+      return [
+        { assetKey: 'pattern_dots', lod: 'ALL', w: 128, h: 64, padding: 0.05 },
+        { assetKey: 'pattern_diagonal45', lod: 'ALL', w: 128, h: 64, padding: 0.05 },
+        { assetKey: 'pattern_gridlines', lod: 'ALL', w: 128, h: 64, padding: 0.05 },
+        { assetKey: 'pattern_cross', lod: 'ALL', w: 128, h: 64, padding: 0.05 },
+      ];
+    case '地形地块':
+      return [
+        ...withLods('tile_empty', 128, 64),
+        ...withLods('tile_grass', 128, 64),
+        ...withLods('tile_water', 128, 64),
+        ...withLods('grid_line', 128, 64),
+      ];
+    case '道路':
+      return [
+        ...withLods('road_straight', 128, 64),
+        ...withLods('road_cross', 128, 64),
+        ...withLods('road_t', 128, 64),
+      ];
+    case '建筑-居住':
+      return [
+        ...withLods('building_res_d1', 128, 64, 'R'),
+        // A-04（T-121）：补中密度 d2，使密度三档在体量高度可辨（art-bible §4.1 锚点 3）
+        ...withLods('building_res_d2', 128, 128, 'R'),
+        // Q-4（T-129）：d3 提到 128×192（仍 128×64 整数倍），与 d1/d2 形成 1:2:3 体量阶梯
+        ...withLods('building_res_d3', 128, 192, 'R'),
+      ];
+    case '建筑-商业':
+      return [
+        ...withLods('building_com_d1', 128, 64, 'C'),
+        ...withLods('building_com_d2', 128, 128, 'C'),
+        ...withLods('building_com_d3', 256, 128, 'C'),
+      ];
+    case '建筑-产业':
+      return [
+        ...withLods('building_ind_d1', 128, 64, 'I'),
+        ...withLods('building_ind_d2', 128, 128, 'I'),
+        // Q-4（T-129）：与居住 d3 同步提到 128×192
+        ...withLods('building_ind_d3', 128, 192, 'I'),
+      ];
+    case '建筑-公共服务':
+      return [...withLods('building_civic', 128, 128, 'CIVIC')];
+    case '植被':
+      return [
+        ...withLods('tree_round', 128, 64),
+        ...withLods('tree_cluster', 128, 64),
+      ];
+    case 'VFX':
+      return [
+        ...withLods('vfx_select_ring', 128, 64),
+        ...withLods('vfx_dust_ring', 128, 64),
+      ];
+    case '昼夜窗光':
+      return [...withLods('windows_points', 128, 64)];
+    case '天气':
+      return [
+        // 天空渐变：全屏 1× 拉伸，**非图集资产**（asset-spec M-055）
+        { assetKey: 'sky_gradient', lod: 'ALL', w: 0, h: 0, nonAtlas: true },
+        ...withLods('weather_rain', 128, 64),
+      ];
+    default:
+      return [];
+  }
+}
+
+/**
+ * 构建虚拟图集清单（12 组齐备；尺寸为程序化占位规格，待真实切片替换）。
+ * 布局确定性：按组顺序、组内顺序做货架打包，无随机。
+ */
+function createVirtualAtlasManifest()               {
+  const out               = [];
+  for (let i = 0; i < ATLAS_GROUPS.length; i++) {
+    const atlasId = ATLAS_GROUPS[i];
+    const items = groupItems(atlasId).map((it) => ({ ...it, key: it.assetKey + '@' + it.lod, atlasId }));
+    out.push(...layoutGroup(items));
+  }
+  return out;
+}
+
+const VIRTUAL_ATLAS_MANIFEST                        = Object.freeze(createVirtualAtlasManifest());
+
+/**
+ * LOD 声明索引（§0.3.5 / T-129 Q-3）：命名层据此**显式**区分
+ * 「`lod='ALL'` 与 `L1` 共用 `_l1` 代表名」的等价关系，而非静默降级。
+ * 单一真源 = 上面的虚拟清单；命名层不另行维护一份声明表。
+ */
+const ALL_LOD_ASSETS                      = new Set(
+  VIRTUAL_ATLAS_MANIFEST.filter((e) => e.lod === 'ALL').map((e) => e.assetKey),
+);
+const SPLIT_LOD_ASSETS                      = new Set(
+  VIRTUAL_ATLAS_MANIFEST.filter((e) => e.lod !== 'ALL').map((e) => e.assetKey),
+);
+
+function entriesOfAtlas(manifest                       , atlasId         )               {
+  return manifest.filter((e) => e.atlasId === atlasId && e.nonAtlas !== true);
+}
+
+function aabbOverlap(a           , b           )          {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/**
+ * 校验虚拟图集清单。错误即失败项，逐条写清原因（供 CI / 评审直接读）。
+ * 检查项：12 组齐备、矩形在 2048² 内、同图集互不重叠、世界资产 128×64 整数倍、
+ * 切片留白（padding ≤10% 且组加权 ≤10%）、同一资产三档 LOD 同 atlasId、
+ * 建筑图集条目带 zoneGate。
+ */
+function validateAtlasManifest(manifest                       )                  {
+  const errors           = [];
+  const stats                             = {};
+
+  for (let i = 0; i < ATLAS_GROUPS.length; i++) {
+    const id = ATLAS_GROUPS[i];
+    if (!manifest.some((e) => e.atlasId === id)) errors.push('missing atlas group: ' + id);
+  }
+
+  for (let i = 0; i < manifest.length; i++) {
+    const e = manifest[i];
+    if (e.nonAtlas === true) continue;
+    const inBounds = e.rect.x >= 0 && e.rect.y >= 0 && e.rect.x + e.rect.w <= ATLAS_SIZE && e.rect.y + e.rect.h <= ATLAS_SIZE;
+    if (!inBounds) errors.push(e.key + ' out of atlas bounds (' + JSON.stringify(e.rect) + ')');
+    if (!UI_SLICE_GROUPS.has(e.atlasId) && !isWorldSizeValid(e.rect.w, e.rect.h)) {
+      errors.push(e.key + ' size ' + e.rect.w + 'x' + e.rect.h + ' is not a 128x64 multiple');
+    }
+    if (e.padding < 0 || e.padding > 0.1) errors.push(e.key + ' padding ' + e.padding + ' exceeds 10%');
+    if (e.atlasId.startsWith('建筑-') && e.zoneGate === undefined) {
+      errors.push(e.key + ' building entry missing zoneGate');
+    }
+  }
+
+  // 同一图集内互不重叠
+  for (let gi = 0; gi < ATLAS_GROUPS.length; gi++) {
+    const id = ATLAS_GROUPS[gi];
+    const list = manifest.filter((e) => e.atlasId === id && e.nonAtlas !== true);
+    let usedArea = 0;
+    let paddingArea = 0;
+    let maxX = 0;
+    let maxY = 0;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      usedArea += a.rect.w * a.rect.h;
+      paddingArea += a.rect.w * a.rect.h * a.padding;
+      if (a.rect.x + a.rect.w > maxX) maxX = a.rect.x + a.rect.w;
+      if (a.rect.y + a.rect.h > maxY) maxY = a.rect.y + a.rect.h;
+      for (let j = i + 1; j < list.length; j++) {
+        if (aabbOverlap(a.rect, list[j].rect)) errors.push('overlap in ' + id + ': ' + a.key + ' >< ' + list[j].key);
+      }
+    }
+    const canvasArea = ATLAS_SIZE * ATLAS_SIZE;
+    stats[id] = {
+      usedArea,
+      canvasArea,
+      occupancy: canvasArea === 0 ? 0 : usedArea / canvasArea,
+      paddingRatio: usedArea === 0 ? 0 : paddingArea / usedArea,
+      maxX,
+      maxY,
+    };
+    if (stats[id].paddingRatio > 0.1) errors.push('atlas ' + id + ' padding ratio ' + stats[id].paddingRatio.toFixed(4) + ' exceeds 10%');
+  }
+
+  // 同一资产三档 LOD 必须同 atlasId（art-bible §2.3）
+  const byAsset                                                    = {};
+  for (let i = 0; i < manifest.length; i++) {
+    const e = manifest[i];
+    if (e.nonAtlas === true) continue;
+    const rec = byAsset[e.assetKey];
+    if (rec === undefined) {
+      byAsset[e.assetKey] = { atlas: e.atlasId, lods: [e.lod] };
+    } else {
+      if (rec.atlas !== e.atlasId) errors.push('asset ' + e.assetKey + ' split across atlases: ' + rec.atlas + ' vs ' + e.atlasId);
+      rec.lods.push(e.lod);
+    }
+  }
+  for (const k of Object.keys(byAsset)) {
+    const lods = byAsset[k].lods;
+    if (lods.indexOf('ALL') >= 0) continue;
+    for (let li = 0; li < 3; li++) {
+      const want = ['L0', 'L1', 'L2'][li];
+      if (lods.indexOf(want) < 0) errors.push('asset ' + k + ' missing lod ' + want);
+    }
+  }
+
+  return { ok: errors.length === 0, errors, stats };
+}
+
+/** 帧键解析表：assetKey + lod → 帧键（draw-list 用；缺失即报，不静默兜底） */
+function buildFrameKeyIndex(manifest                       )                                       {
+  const map                             = {};
+  for (let i = 0; i < manifest.length; i++) {
+    const e = manifest[i];
+    if (e.nonAtlas === true) continue;
+    map[e.assetKey + '@' + e.lod] = e;
+  }
+  return Object.freeze(map);
+}
+
+                          
+                               
+                               
+                               
+                                               
+                              
+     
+                                                     
+                                                       
+                                                          
+     
+                                    
+ 
+
+/** MVP 期 Could 预留（不加载）的图集组；开启 Could 期时由调用方忽略本列表 */
+const DEFERRED_COULD_ATLASES                     = ['昼夜窗光', '天气'];
+
+/**
+ * 按「激活分区集 + LOD」解析图集加载集。
+ * 规则（architecture §6.1）：
+ * - 常驻：UI / UI-图案编码 / 地形地块 / 道路（切 LOD 不卸载）；
+ * - 按需：激活分区的建筑图集（切 LOD 不卸载，故三档都进 onDemand）+ 植被 / VFX / 天气（按 LOD）；
+ * - 排除：未激活分区的建筑图集、当前 LOD 下关闭的组；
+ * - 未解锁分区**一律不出现在 resident / onDemand**。
+ */
+function resolveLoadSet(activeZones                   , lod          , manifest                        = VIRTUAL_ATLAS_MANIFEST)          {
+  const resident            = [];
+  for (let i = 0; i < RESIDENT_ATLASES.length; i++) resident.push(RESIDENT_ATLASES[i]);
+
+  const onDemand            = [];
+  const excluded            = [];
+  const activeBuildingAtlases            = [];
+  for (let i = 0; i < activeZones.length; i++) {
+    const atlas = ZONE_TO_ATLAS[activeZones[i]];
+    if (atlas !== undefined && activeBuildingAtlases.indexOf(atlas) < 0) activeBuildingAtlases.push(atlas);
+  }
+
+  for (let i = 0; i < ATLAS_GROUPS.length; i++) {
+    const id = ATLAS_GROUPS[i];
+    if (resident.indexOf(id) >= 0) continue;
+    if (id.startsWith('建筑-')) {
+      if (activeBuildingAtlases.indexOf(id) >= 0) onDemand.push(id);
+      else excluded.push(id);
+      continue;
+    }
+    if (id === '植被') {
+      // 植被：L0 合并为分区绿地色块（不单独加载），L1/L2 按需
+      if (lod === 'L0') excluded.push(id);
+      else onDemand.push(id);
+      continue;
+    }
+    if (id === 'VFX') {
+      // art-bible §2.3：粒子仅 L1 / L2 启用，L0 全部关闭
+      if (lod === 'L0') excluded.push(id);
+      else onDemand.push(id);
+      continue;
+    }
+    if (id === '昼夜窗光') {
+      // Could 项：仅 L2 开放（美 Bible 裁定 4 移入 Could，L0/L1 关闭）
+      if (lod === 'L2') onDemand.push(id);
+      else excluded.push(id);
+      continue;
+    }
+    if (id === '天气') {
+      if (lod === 'L0') excluded.push(id);
+      else onDemand.push(id);
+      continue;
+    }
+  }
+
+  // 只保留清单里真实存在的组（避免空组进入加载集）
+  const present = (id         )          => manifest.some((e) => e.atlasId === id && e.nonAtlas !== true);
+  const nonAtlas           = [];
+  for (let i = 0; i < manifest.length; i++) {
+    if (manifest[i].nonAtlas === true && nonAtlas.indexOf(manifest[i].assetKey) < 0) nonAtlas.push(manifest[i].assetKey);
+  }
+
+  return {
+    resident: resident.filter(present),
+    onDemand: onDemand.filter(present),
+    excluded: excluded.filter(present),
+    nonAtlas,
+    // A-06：只做标记，不改加载行为（MVP 期由上层忽略这两组即可）
+    deferredCould: DEFERRED_COULD_ATLASES.filter(present),
+  };
+}
+
+// =======================================================================
+// src/render/asset-naming.ts
+// =======================================================================
+/**
+ * HC-01 · 渲染内核 · 资产命名映射层（S-06 · A-01 / T-129 加固）
+ *
+ * 背景（art-director 评审 A-01，中高）：工程内部 assetKey 体系（`building_res_d1@L1`）
+ * 与 asset-spec 交付命名规范（`bld_res_low_v1_l1`）不一致，真实切片到位时会
+ * 「改名 + 改渲染代码」。主理人裁定方案②：**不重命名内部键**，新增本映射层。
+ *
+ * 准绳：`design/assets/asset-spec.md` **v0.1.1** §0.3（只读引用，本文件不修改文档）：
+ * - 结构 `{类别前缀}_{语义段…}_{变体}_{LOD档}`，全小写 + 下划线，段间不得空段；
+ * - §0.3.1 前缀受控 17 个；§0.3.2 **语义段必须取自律定词表**（`shape` 不入表，视为违规，
+ *   状态图标唯一准绳是 `state`）；§0.3.3 描述词弱约束（非穷举，允许扩展）；
+ * - §0.3.5 `_l1` 为代表名，`lod='ALL'` 与 `L1` 共用 `_l1`；同一 assetKey 不得同时声明二者，
+ *   且**二者须由校验断言区分，不得静默降级**（本文件用 `declaredLod` 显式标注）。
+ *
+ * T-129 变更：
+ * - 7 条命名订正（按 v0.1.1 附录 C / §0.3.4）：`icon_shape_* → icon_state_*`（语义化），
+ *   `font_ui_main → font_ui_cjk`；其中 2/3/5/6 由「物理形状」改为「玩家可见语义」
+ *   （exclamation→warn、cross→neg、arrow_up→up、arrow_down→down）。
+ * - `validateSheetName()`：把 §0.3.2 受控语义词表并入断言（此前只校验前缀 + 小写 + `_lN`，
+ *   所以 `icon_shape_*` 能通过校验 → 已被 4 条反例覆盖）。
+ * - `fromSheetName()` 返回 `declaredLod`，显式声明 ALL≡`_l1` 等价关系（Q-3）。
+ *
+ * 纪律：本文件零 hex / 零颜色 / 零引擎依赖（只做字符串表与词表校验），不写任何状态。
+ */
+
+
+                                         
+
+/** 内部 assetKey → 规范名 stem（不含 `_lN` 后缀） */
+const ASSET_SHEET_STEMS                                   = {
+  // 地块 / 地形（asset-spec M-001~009）
+  tile_empty: 'tile_ground_empty_base',
+  tile_grass: 'tile_ground_grass_base',
+  tile_water: 'tile_ground_shore_base',
+  grid_line: 'grid_plan_visible_base',
+  // 道路（M-010~020）
+  road_straight: 'road_straight_a_base',
+  road_cross: 'road_cross_base',
+  road_t: 'road_t_base',
+  // 建筑（M-026~048）：d1/d2/d3 ↔ low/mid/high，v1 为占位代表变体
+  building_res_d1: 'bld_res_low_v1',
+  building_res_d2: 'bld_res_mid_v1',
+  building_res_d3: 'bld_res_high_v1',
+  building_com_d1: 'bld_com_low_v1',
+  building_com_d2: 'bld_com_mid_v1',
+  building_com_d3: 'bld_com_high_v1',
+  building_ind_d1: 'bld_ind_low_v1',
+  building_ind_d2: 'bld_ind_mid_v1',
+  building_ind_d3: 'bld_ind_high_v1',
+  building_civic: 'bld_civ_base',
+  // 植被（M-049~052）
+  tree_round: 'veg_tree_round_base',
+  tree_cluster: 'veg_tree_cluster_base',
+  // VFX / 光照（M-053~054 / M-085~089）
+  vfx_select_ring: 'vfx_select_ring_base',
+  vfx_dust_ring: 'vfx_dust_ring_base',
+  // Could 项（MVP 不加载，仅预留映射；art-bible 裁定 4）
+  windows_points: 'vfx_windows_points_base',
+  weather_rain: 'vfx_weather_rain_base',
+  // 分区图案（M-056~059）
+  pattern_dots: 'pat_res_dots_base',
+  pattern_diagonal45: 'pat_com_hatch_base',
+  pattern_gridlines: 'pat_ind_grid_base',
+  pattern_cross: 'pat_civ_cross_base',
+  // UI 结构与面板（M-060~075）
+  ui_panel_9slice: 'ui_panel_9slice_base',
+  ui_button_9slice: 'ui_button_9slice_base',
+  ui_tab_9slice: 'ui_tab_9slice_base',
+  ui_icon_zone_R: 'icon_zone_res_base',
+  ui_icon_zone_C: 'icon_zone_com_base',
+  ui_icon_zone_I: 'icon_zone_ind_base',
+  ui_icon_road: 'icon_tool_road_base',
+  ui_icon_endday: 'icon_endday_base',
+  // 状态图标（M-079~084）：v0.1.1 §0.3.4 —— `state` 为唯一准绳，语义词按「玩家可见语义」
+  ui_shape_check: 'icon_state_check_base',
+  ui_shape_exclamation: 'icon_state_warn_base',
+  ui_shape_cross: 'icon_state_neg_base',
+  ui_shape_lock: 'icon_state_lock_base',
+  ui_shape_arrow_up: 'icon_state_up_base',
+  ui_shape_arrow_down: 'icon_state_down_base',
+  // 非图集资产（M-055 / M-090~092）
+  font_token_main: 'font_ui_cjk_base',
+  app_icon: 'brand_app_icon_base',
+  sky_gradient: 'sky_day_gradient_base',
+};
+
+const LOD_SUFFIX                                   = { L0: '_l0', L1: '_l1', L2: '_l2', ALL: '_l1' };
+
+/**
+ * §0.3.5 显式等价声明（Q-3）：`lod='ALL'`（不随世界缩放变化）与 `L1` 共用 `_l1` 代表名。
+ * 该等价关系**必须显式**（`fromSheetName().declaredLod`），不得静默降级为 `L1`。
+ */
+const LOD_EQUIVALENCE = Object.freeze({
+  representative: 'L1'         ,
+  aliases: Object.freeze(['ALL']         ),
+  rule: 'lod=ALL 与 L1 共用 _l1 代表名；同一 assetKey 不得同时声明二者（collision 拒绝）；回查时以 declaredLod 区分',
+});
+
+// ---------------------------------------------------------------------------
+// §0.3.1 / §0.3.2 / §0.3.3 词表（与 asset-spec v0.1.1 逐项对齐）
+// ---------------------------------------------------------------------------
+
+/** §0.3.1 类别前缀（受控 17 个，不得自造） */
+const CATEGORY_PREFIXES                    = [
+  'tile', 'grid', 'overlay', 'road', 'flow', 'bld', 'veg', 'shadow', 'ao',
+  'sky', 'pat', 'ui', 'icon', 'vfx', 'font', 'brand', 'a11y',
+];
+
+/** §0.3.2 受控语义词（**语义段必须取自此表**；`shape` 不入表 = 违规） */
+const CONTROLLED_SEMANTIC_WORDS                                              = {
+  zone: ['res', 'com', 'ind', 'civ'],
+  density: ['low', 'mid', 'high'],
+  road: ['straight', 'corner', 't', 'cross', 'end'],
+  state: ['state'],
+  tool: ['tool'],
+  metric: ['metric'],
+  zoneIcon: ['zone'],
+  pattern: ['dots', 'hatch', 'grid', 'cross', 'canopy', 'vertical-bars'],
+  preview: ['valid', 'invalid', 'plan', 'view'],
+  variant: ['base', 'v1', 'v2', 'v3'],
+};
+
+/**
+ * §0.3.3 描述词白名单（弱约束、非穷举；新增描述词不需修订文档）。
+ * 前 68 项逐字取自 §0.3.3「当前在用描述词」；其后为**描述词扩展**（同样属于 §0.3.3
+ * 允许范围，用于覆盖 v0.1.1 正文里实际在用的名称）：
+ * `a` `b`（直道 A/B 方向）· `visible`（grid_plan_visible）· `ring`（选中环 / 尘环）·
+ * `windows` `points` `weather` `rain`（Could 预留项，美术侧判定保持现状）·
+ * `road`（icon_tool_road）· `cjk`（font_ui_cjk）· `icon`（brand_app_icon）。
+ */
+const DESCRIPTOR_WORDS                    = [
+  'ground', 'empty', 'grass', 'shore', 'roadbase', 'mark', 'lane', 'zebra', 'stop', 'arrow',
+  'signal', 'line', 'thin', 'mid', 'thick', 'congest', 'pulse', 'static', 'tree', 'round',
+  'cluster', 'cone', 'micro', 'soft', 'ellipse', 'contact', 'day', 'gradient', 'hud', 'topbar',
+  'issue', 'list', 'diag', 'panel', 'minimap', 'frame', 'toast', '9slice', 'button', 'tab',
+  'detail', 'card', 'endday', 'demolish', 'satisfaction', 'budget', 'cycle', 'check', 'warn',
+  'neg', 'lock', 'up', 'down', 'place', 'spread', 'dust', 'growth', 'sweep', 'alert', 'select',
+  'breath', 'ui', 'app', 'pattern', 'palette',
+  // 描述词扩展（§0.3.3 允许）
+  'a', 'b', 'visible', 'ring', 'windows', 'points', 'weather', 'rain', 'road', 'cjk', 'icon',
+];
+
+const CONTROLLED_SET                      = (() => {
+  const s = new Set        ();
+  for (const k of Object.keys(CONTROLLED_SEMANTIC_WORDS)) {
+    for (const w of CONTROLLED_SEMANTIC_WORDS[k]) s.add(w);
+  }
+  return s;
+})();
+const DESCRIPTOR_SET                      = new Set(DESCRIPTOR_WORDS);
+
+/** 违规词黑名单（给更具体的错误提示；不依赖它拦截，白名单本身就会拒绝） */
+const VIOLATION_HINTS                                   = {
+  shape: '§0.3.4：`shape` 不入词表，状态图标唯一准绳是 `state`（如 icon_state_warn_base_l1）',
+  d1: '§0.3.2：`d1` 是工程私有键，交付名须用 `low`',
+  d2: '§0.3.2：`d2` 是工程私有键，交付名须用 `mid`',
+  d3: '§0.3.2：`d3` 是工程私有键，交付名须用 `high`',
+};
+
+                                 
+              
+                            
+ 
+
+/**
+ * 规范名合法性校验（§0.3 全量）：
+ * ① 全小写 ASCII + 下划线、无空段、无连字符；② 前缀受控；③ LOD 段 `l0/l1/l2`；
+ * ④ 变体段 `base|vN`；⑤ **语义段（1–3 段）每段必须命中受控词或描述词白名单**；
+ * ⑥ `shape` / `d1|d2|d3` 等违规词给出明确理由。
+ */
+function validateSheetName(name        )                 {
+  const errors           = [];
+  if (!/^[a-z0-9_]+$/.test(name)) errors.push('只允许小写 ASCII 字母 / 数字 / 下划线（大写视为违规）：' + name);
+  if (name.indexOf('__') >= 0) errors.push('出现空段（`__`）：' + name);
+  if (name.indexOf('-') >= 0) errors.push('不得含连字符：' + name);
+
+  const segs = name.split('_');
+  if (segs.length < 4) {
+    errors.push('段数不足（需「前缀 + ≥1 语义段 + 变体 + LOD」≥4 段）：' + name);
+  }
+
+  const lod = segs[segs.length - 1];
+  if (!/^l[012]$/.test(lod)) errors.push('LOD 段须为 `l0` / `l1` / `l2`：' + name);
+
+  const prefix = segs[0];
+  if (CATEGORY_PREFIXES.indexOf(prefix) < 0) errors.push('类别前缀不在受控表（§0.3.1）：' + prefix);
+
+  const variant = segs[segs.length - 2];
+  if (!/^(?:base|v[1-9][0-9]*)$/.test(variant)) {
+    const variantHint = VIOLATION_HINTS[variant];
+    errors.push('变体段须为 `base` 或 `vN`（§0.3）：' + variant + (variantHint !== undefined ? ' —— ' + variantHint : ''));
+  }
+
+  const semantic = segs.slice(1, Math.max(1, segs.length - 2));
+  if (semantic.length < 1 || semantic.length > 3) {
+    errors.push('语义段须为 1–3 段（§0.3）：实际 ' + semantic.length + ' 段 [' + semantic.join(', ') + ']');
+  }
+  for (let i = 0; i < semantic.length; i++) {
+    const w = semantic[i];
+    const hint = VIOLATION_HINTS[w];
+    if (hint !== undefined) {
+      errors.push('违规语义词 `' + w + '`：' + hint);
+      continue;
+    }
+    if (!CONTROLLED_SET.has(w) && !DESCRIPTOR_SET.has(w)) {
+      errors.push('语义段不在受控词 / 描述词白名单（§0.3.2 / §0.3.3）：`' + w + '`（' + name + '）');
+    }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+/** §0.3.5：assetKey 的 LOD 声明（来自图集清单，单一真源） */
+function declaredLodOf(assetKey        )                  {
+  if (ALL_LOD_ASSETS.has(assetKey)) return 'ALL';
+  if (SPLIT_LOD_ASSETS.has(assetKey)) return 'SPLIT';
+  throw new Error('assetKey 未在图集清单中声明 LOD：' + assetKey);
+}
+
+                                      
+                   
+                                 
+                        
+                                                             
+                               
+                                                      
+                                 
+ 
+
+/**
+ * 内部 assetKey + LOD → asset-spec §0.3 规范名。
+ * 例：`toSheetName('building_res_d1', 'L1') === 'bld_res_low_v1_l1'`。
+ * 未知 assetKey **显式抛错**（不得静默兜底，避免真实切片错配）。
+ */
+function toSheetName(assetKey        , lod                   = 'L1')         {
+  const stem = ASSET_SHEET_STEMS[assetKey];
+  if (stem === undefined) throw new Error('no sheet name mapping for assetKey: ' + assetKey);
+  const suffix = LOD_SUFFIX[lod];
+  if (suffix === undefined) throw new Error('unsupported lod: ' + String(lod));
+  return stem + suffix;
+}
+
+/**
+ * 反向解析：规范名 → `{ assetKey, lod, declaredLod, viaRepresentativeName }`。
+ * `_l1` 后缀无二义信息：对 `lod='ALL'` 的资产，`declaredLod='ALL'` 且
+ * `viaRepresentativeName=true`，**不做静默降级**（Q-3 / asset-spec §0.3.5）。
+ * 未知名称显式抛错。
+ */
+function fromSheetName(sheetName        )                      {
+  const lods                       = ['L0', 'L1', 'L2', 'ALL'];
+  const keys = Object.keys(ASSET_SHEET_STEMS);
+  for (let i = 0; i < keys.length; i++) {
+    const assetKey = keys[i];
+    for (let li = 0; li < lods.length; li++) {
+      if (toSheetName(assetKey, lods[li]) === sheetName) {
+        const declaredLod = declaredLodOf(assetKey);
+        const viaRepresentativeName = declaredLod === 'ALL';
+        return { assetKey, lod: viaRepresentativeName ? 'L1' : lods[li], declaredLod, viaRepresentativeName };
+      }
+    }
+  }
+  throw new Error('unknown sheet name: ' + sheetName);
+}
+
+/** 图集清单条目 → 规范名（图集视图里直接可读） */
+function sheetNameOfEntry(entry            )         {
+  return toSheetName(entry.assetKey, entry.lod);
+}
+
+                                 
+              
+                            
+                 
+                 
+                                    
+                      
+ 
+
+/**
+ * 命名覆盖率校验（**每一个清单条目都必须映射出规范名**）：
+ * ① 覆盖：无缺失映射；② 合法性：`validateSheetName`（含受控语义词表）；
+ * ③ 唯一：规范名无碰撞；④ 反解一致：`fromSheetName(toSheetName(e))` 回到原 assetKey；
+ * ⑤ LOD 声明一致：`lod='ALL'` 的资产其所有条目必须是 `ALL`（反之亦然），
+ *    代表名等价关系由 `declaredLod` 显式表达（§0.3.5）。
+ */
+function assertNamingCoverage(manifest                       )                 {
+  const errors           = [];
+  const seen                         = {};
+  let mapped = 0;
+
+  for (let i = 0; i < manifest.length; i++) {
+    const entry = manifest[i];
+    let sheet = '';
+    try {
+      sheet = toSheetName(entry.assetKey, entry.lod);
+    } catch (err) {
+      errors.push('unmapped assetKey: ' + entry.assetKey + ' (' + String(err) + ')');
+      continue;
+    }
+    mapped++;
+
+    const check = validateSheetName(sheet);
+    if (!check.ok) {
+      for (const e of check.errors) errors.push(e);
+    }
+
+    // ⑤ LOD 声明一致（§0.3.5：ALL 与 L1 共用代表名，但不得混用声明）
+    let declaration                              = 'UNKNOWN';
+    try {
+      declaration = declaredLodOf(entry.assetKey);
+    } catch (err) {
+      errors.push('lod declaration missing: ' + entry.assetKey + ' (' + String(err) + ')');
+    }
+    if (declaration === 'ALL' && entry.lod !== 'ALL') {
+      errors.push('asset ' + entry.assetKey + ' 声明 ALL，但清单条目 lod=' + entry.lod + '（代表名不得混用）');
+    }
+    if (declaration === 'SPLIT' && entry.lod === 'ALL') {
+      errors.push('asset ' + entry.assetKey + ' 声明三档切片，但清单条目 lod=ALL');
+    }
+
+    const prev = seen[sheet];
+    if (prev !== undefined) {
+      errors.push('sheet name collision: ' + sheet + ' ← ' + prev + ' / ' + entry.key);
+    } else {
+      seen[sheet] = entry.key;
+    }
+
+    try {
+      const back = fromSheetName(sheet);
+      if (back.assetKey !== entry.assetKey) {
+        errors.push('round-trip assetKey mismatch: ' + sheet + ' → ' + back.assetKey + ' (expect ' + entry.assetKey + ')');
+      }
+      if (declaration === 'SPLIT' && back.declaredLod !== 'SPLIT') {
+        errors.push('round-trip declaredLod mismatch: ' + sheet + ' → ' + back.declaredLod);
+      }
+    } catch (err) {
+      errors.push('round-trip failed: ' + sheet + ' (' + String(err) + ')');
+    }
+  }
+
+  const uniqueNames = Object.keys(seen).length;
+  if (uniqueNames !== mapped) errors.push('unique names ' + uniqueNames + ' != mapped entries ' + mapped);
+  return { ok: errors.length === 0, errors, mapped, uniqueNames };
+}
+
+// =======================================================================
+// src/render/texture-format.ts
+// =======================================================================
+/**
+ * HC-01 · 渲染内核 · 纹理格式探测（S-06）
+ *
+ * 权威口径：asset-spec §0.2 / §0.4 —— 世界资产入图集后 **ASTC 首选 → ETC2 回退 →
+ * 不透明底可用 RGB565**；UI 图标 / 文字图集用 RGBA8888 或不压缩保清晰。
+ * art-bible U-1 / D-1：ASTC / ETC2 在 Cocos 3.x 鸿蒙导出的实际支持须真机校准后定稿。
+ *
+ * 本模块只做**能力探测与决策**，不实现压缩；结果需写入真机校准记录（S-04 / S-12）。
+ */
+
+                                                                             
+
+                              
+                
+                
+                  
+ 
+
+                                     
+                        
+                    
+                 
+ 
+
+/**
+ * 按 ASTC → ETC2 → RGB565 → NONE 的降级链选择世界资产压缩格式。
+ * `opaqueBackground=true` 时 RGB565 才可用（透明底必须带 alpha，不能掉到 RGB565）。
+ */
+function probeTextureFormat(caps             , opaqueBackground = true)                     {
+  if (caps.astc) return { chosen: 'ASTC', degraded: false, reason: 'ASTC supported (首选)' };
+  if (caps.etc2) return { chosen: 'ETC2', degraded: true, reason: 'ASTC unsupported → ETC2 回退' };
+  if (caps.rgb565 && opaqueBackground) return { chosen: 'RGB565', degraded: true, reason: 'ASTC/ETC2 unsupported → RGB565（仅不透明底）' };
+  return { chosen: 'NONE', degraded: true, reason: '无压缩纹理能力可用 → 不压缩 + 维持 RGBA8888 保正确性（需真机校准）' };
+}
+
+/** UI 图标 / 文字图集：按 art-bible §9.3 固定 RGBA8888 或不压缩，不参与压缩降级链 */
+function probeUiTextureFormat(caps             )                     {
+  return {
+    chosen: 'RGBA8888',
+    degraded: false,
+    reason: 'UI 图标 / 文字图集保清晰度，不压缩（art-bible §9.3）；ASTC=' + String(caps.astc) + ' ETC2=' + String(caps.etc2),
+  };
+}
+
+// =======================================================================
+// src/render/draw-list.ts
+// =======================================================================
+/**
+ * HC-01 · 渲染内核 · 绘制列表与合批估算（S-06）
+ *
+ * 权威口径：
+ * - art-bible §2.1：等距遮挡**统一**按 Y 轴深度排序（`compareDepth`），禁止逐对象
+ *   手写 zIndex 例外。
+ * - art-bible §9.3：同屏同图集优先、避免跨图集交替绘制打断自动合批；LOD 三档资产
+ *   打入同一图集（切档不产生跨图集抖动）。
+ * - art-bible §2.3 DrawCall 目标（**建议基线，非承诺值、不作门禁**）：
+ *   L0 ≤ 30 / L1 ≤ 60–80 / L2 ≤ 120。本模块给出的是**估算**，不是实测。
+ *
+ * 深度 vs 合批的取舍（诚实说明）：两者天然冲突。本实现采用「先按深度求序、再按
+ * 图集归批」——批内仍严格按深度升序绘制，跨图集的重叠遮挡由「同图集优先」设计规避
+ * （地形 / 道路 / 建筑各自成层，同格建筑在层级上高于地形）。批次数 = 使用的图集数，
+ * 即估算 DrawCall；这是「无跨图集交替」这一 S-06 验收点的直接产物。
+ */
+
+
+                                             
+                                                       
+
+const DRAW_CALL_BASELINE                                     = { L0: 30, L1: 80, L2: 120 };
+
+                                                         
+
+                             
+                           
+                
+                    
+             
+             
+                              
+            
+            
+                   
+                   
+                   
+                  
+                   
+ 
+
+                            
+                  
+                        
+ 
+
+                           
+                
+               
+                            
+                        
+                                           
+                       
+                      
+                             
+                                      
+                  
+                                                    
+                          
+                                         
+                           
+                                             
+                           
+                                                   
+                             
+ 
+
+/**
+ * 叠加层（状态 / 通勤形状）：**独立绘制层**，不进 `sprites` / 不参与合批
+ * （art-bible §3.3「流线绘制在独立 RenderLayer」）。
+ *
+ * L0 门槛（T-129 / 主理人 Q-1 裁定 A，art-bible §2.3「L0 细节降级」+ §3.4）：
+ * - **L0 不产出任何 status / flow 形状图标**（`shapeSpriteCount === 0`）；
+ * - 通勤态在 L0 改由**线宽 / 亮度**表达（`line` 编码非空，信息不丢失）；
+ * - 状态类（status.*）在 L0 无形状亦无线编码 → 记入 `hiddenOverlayCount`（远景态可接受）；
+ * - L1 / L2 产出形状；**L1 形状带 1px `ink` 内描边**（描边色由调用方以 `base.ink`
+ *   令牌传入，渲染层不自造色值），L2 不描边。
+ */
+                                             
+
+/** 叠加层令牌（来自 SemanticTokenMap；渲染层不复制色值 / 形状映射） */
+                               
+             
+                
+                
+                
+                
+ 
+
+                              
+                    
+                      
+                      
+                                                             
+                                                    
+ 
+
+                              
+                    
+             
+             
+            
+            
+                      
+                  
+                
+                
+                
+                             
+                        
+                                                                  
+                                                                 
+                                         
+                                                          
+                   
+ 
+
+const DEFAULT_FLOW_LINE                                                                       = {
+  'flow.clear': { widthScale: 1, brightness: 0.6 },
+  'flow.slow': { widthScale: 2, brightness: 0.8 },
+  'flow.congested': { widthScale: 3, brightness: 1 },
+};
+const DEFAULT_STATUS_LINE = { widthScale: 2, brightness: 0.9 };
+
+function deriveLine(spec             )                                             {
+  if (spec.line !== undefined) return spec.line;
+  const preset = DEFAULT_FLOW_LINE[spec.token.id];
+  return preset !== undefined ? preset : DEFAULT_STATUS_LINE;
+}
+
+                                  
+                                              
+                                                   
+                                            
+                                                                
+                                                  
+                                    
+                                                           
+                                             
+ 
+
+const DEFAULT_ZONE_ASSET                                   = {
+  2: 'building_res', // R
+  3: 'building_com', // C
+  4: 'building_ind', // I
+};
+
+/**
+ * 密度档 → 资产变体后缀（**单一映射**，A-04 / T-121）：
+ * `0 → ''`（无建筑）、`1 → 'd1'`、`2 → 'd2'`、`3 → 'd3'`，>3 钳到 d3。
+ * 口径：内部 `d1/d2/d3` ↔ asset-spec §0.3 的 `low/mid/high`（见 asset-naming.ts）。
+ */
+function densityToSuffix(density        )         {
+  if (!Number.isFinite(density) || density <= 0) return '';
+  if (density >= 3) return 'd3';
+  return 'd' + Math.floor(density);
+}
+
+function defaultDensitySuffix(kind            , density        )         {
+  return kind === 'building' ? densityToSuffix(density) : '';
+}
+
+/** 帧键查找表（来自图集清单；`assetKey@lod`） */
+function indexManifest(manifest                       )                                       {
+  const map                             = {};
+  for (let i = 0; i < manifest.length; i++) {
+    const e = manifest[i];
+    if (e.nonAtlas === true) continue; // 非图集资产不进合批链
+    map[e.assetKey + '@' + e.lod] = e;
+  }
+  return map;
+}
+
+function findFrame(index                                      , assetKey        , lod          )                         {
+  const direct = index[assetKey + '@' + lod];
+  if (direct !== undefined) return direct;
+  return index[assetKey + '@ALL'];
+}
+
+/**
+ * 构建绘制列表：只读消费 VM，不触碰权威状态。
+ * 地形层：每个已解锁格一张地块 tile；道路层：ROAD 格；建筑层：非空分区且密度 > 0。
+ */
+function buildDrawList(
+  vm                 ,
+  manifest                       ,
+  lod          ,
+  options                  = {},
+)           {
+  const frameIndex = indexManifest(manifest);
+  const zoneAssetBase = options.zoneAssetBase ?? DEFAULT_ZONE_ASSET;
+  const densitySuffix = options.densitySuffix ?? defaultDensitySuffix;
+  const side = vm.side;
+  const cells = vm.cells;
+  const count = side * side;
+
+  const sprites               = [];
+  let skipped = 0;
+
+  const push = (cellIndex        , gx        , gy        , kind            , assetKey        )       => {
+    const entry = findFrame(frameIndex, assetKey, lod);
+    if (entry === undefined) {
+      skipped++;
+      return;
+    }
+    const p = gridToScreen(gx, gy);
+    sprites.push({
+      index: 0,
+      cellIndex,
+      gx,
+      gy,
+      x: p.x,
+      y: p.y,
+      kind,
+      assetKey,
+      frameKey: entry.key,
+      atlasId: entry.atlasId,
+      depthKey: depthKey(gx, gy),
+    });
+  };
+
+  for (let i = 0; i < count; i++) {
+    if (cells.unlocked[i] !== 1) continue;
+    const gx = i % side;
+    const gy = (i - gx) / side;
+    const zone = cells.zone[i];
+    // 地形层：每格一块地
+    push(i, gx, gy, 'terrain', 'tile_empty');
+    if (zone === 1) {
+      push(i, gx, gy, 'road', 'road_straight');
+      continue;
+    }
+    if (zone >= 2) {
+      const base = zoneAssetBase[zone];
+      if (base === undefined) {
+        skipped++;
+        continue;
+      }
+      const density = cells.density[i];
+      if (density <= 0) continue; // 已分区但未建设：只画地形 + 分区色（无建筑体量）
+      const suffix = densitySuffix('building', density);
+      push(i, gx, gy, 'building', base + '_' + suffix);
+    }
+  }
+
+  // 深度排序：唯一规则（gx+gy 升序，平局 gx 升序）；同格内地形先于建筑
+  const kindOrder                             = { terrain: 0, road: 1, building: 2 };
+  sprites.sort((a, b) => {
+    const d = compareDepth(a, b);
+    if (d !== 0) return d;
+    return kindOrder[a.kind] - kindOrder[b.kind];
+  });
+  for (let i = 0; i < sprites.length; i++) sprites[i].index = i;
+
+  // 按图集聚合：首次出现顺序建档；批内保持深度升序（即 sprites 的相对序）
+  const batches              = [];
+  const batchIndex                         = {};
+  for (let i = 0; i < sprites.length; i++) {
+    const s = sprites[i];
+    let bi = batchIndex[s.atlasId];
+    if (bi === undefined) {
+      bi = batches.length;
+      batchIndex[s.atlasId] = bi;
+      batches.push({ atlasId: s.atlasId, sprites: [] });
+    }
+    batches[bi].sprites.push(s);
+  }
+
+  // ---- 叠加层（状态 / 通勤形状）：独立层，不进 sprites / 不进合批 ----
+  // L0 门控（T-129 Q-1 裁定 A）：任何 status / flow **形状**都不产出；
+  // 通勤态改由线宽 / 亮度编码（line 非空），保证 L0 信息不丢失。
+  const overlaySpecs = options.overlays ?? [];
+  const overlays                = [];
+  for (let i = 0; i < overlaySpecs.length; i++) {
+    const spec = overlaySpecs[i];
+    const ci = spec.cellIndex;
+    if (!Number.isInteger(ci) || ci < 0 || ci >= count) {
+      skipped++;
+      continue;
+    }
+    const gx = ci % side;
+    const gy = (ci - gx) / side;
+    const p = gridToScreen(gx, gy);
+    const overlay              = {
+      cellIndex: ci,
+      gx,
+      gy,
+      x: p.x,
+      y: p.y,
+      layer: spec.layer,
+      tokenId: spec.token.id,
+      group: spec.token.group,
+      color: spec.token.color,
+      shape: spec.token.shape,
+      shapeVisible: false,
+      line: null,
+      depthKey: depthKey(gx, gy),
+    };
+    if (lod === 'L0') {
+      // L0：形状一律关闭；通勤态保留线宽 / 亮度编码
+      overlay.line = spec.layer === 'flow' ? deriveLine(spec) : null;
+    } else {
+      overlay.shapeVisible = true;
+      if (lod === 'L1' && options.outlineInk !== undefined) {
+        overlay.outline = { width: 1, inkTokenId: options.outlineInk.id, color: options.outlineInk.color };
+      }
+    }
+    overlays.push(overlay);
+  }
+  overlays.sort((a, b) => compareDepth(a, b));
+
+  let shapeSpriteCount = 0;
+  let lineEncodedCount = 0;
+  let hiddenOverlayCount = 0;
+  for (let i = 0; i < overlays.length; i++) {
+    if (overlays[i].shapeVisible) shapeSpriteCount++;
+    else if (overlays[i].line !== null) lineEncodedCount++;
+    else hiddenOverlayCount++;
+  }
+
+  return {
+    lod,
+    zoom: zoomScale(lod),
+    sprites,
+    batches,
+    spriteCount: sprites.length,
+    estimatedDrawCalls: batches.length,
+    skipped,
+    overlays,
+    shapeSpriteCount,
+    lineEncodedCount,
+    hiddenOverlayCount,
+  };
+}
+
+// =======================================================================
+// src/render/backend.ts
+// =======================================================================
+/**
+ * HC-01 · 渲染内核 · 渲染后端抽象（S-06）
+ *
+ * 引擎无关的最小后端接口：Cocos 适配（`cocos/cocos-backend.ts`）与浏览器 Canvas
+ * 预览（`preview/app.mjs`）各自实现同一契约，渲染内核只依赖本接口。
+ *
+ * 深度语义：`setDepth(handle, depthKey)` 的入参即 `iso.depthKey` 的单调键，
+ * 由 `compareDepth` 的唯一规则产生（art-bible §2.1：禁止逐对象手写 zIndex 例外）。
+ */
+
+/** 节点句柄（引擎侧对象由后端自行管理；内核不感知具体类型） */
+                                  
+
+                                
+                       
+                                             
+                                              
+                                                         
+                                                                
+                                                      
+                                            
+                                                         
+                                      
+                                    
+                   
+ 
+
+/** 后端能力自述（用于验证记录 / 校准记录，不做门禁） */
+                                    
+                        
+                                                      
+                                     
+ 
+
+// =======================================================================
+// preview/app.mjs
+// =======================================================================
+/**
+ * HC-01 · S-06 浏览器预览应用（T-118 交付 / T-121 P-01 修复）
+ *
+ * 全部绘制数据来自 `preview/dist/`（由 `node preview/build.mjs` 从 src/ 剥类型生成）：
+ * 单一真源，预览页不复制任何渲染逻辑。
+ *
+ * 本页展示：
+ *  - 16×16 起步地图（空地 / 三类分区 / 道路）用**语义令牌**取色（无本地 hex）；
+ *  - **默认 L0 全图概览 + 世界包围盒居中**（P-01 修复）；切档保持视口中心不动；
+ *  - L0 / L1 / L2 三档固定缩放 + 「概览」按钮回 L0 + 双击回 L1；
+ *  - `?lod=L0|L1|L2` URL 参数（便于自动化截图核验，默认 L0）；
+ *  - 点击拾取（screenToGrid）命中格高亮；
+ *  - 深度排序后的绘制顺序、按图集聚合的批次与 DrawCall 估算；
+ *  - 当前 LOD 的图集加载集（resident / onDemand / excluded / Could 预留标记）；
+ *  - 高对比模式开关（图案 18% → 30% + 1px 深色描边，A-05 / M-093）。
+ *
+ * ⚠️ 演示数据说明：本页直接构造一份 16×16 **示例 state** 充当渲染输入（不是权威存档，
+ *    也不接 session）；Cocos 适配未验证（本机无编辑器），真机 / 编辑器验证随 W4。
+ */
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------------------
+// 示例地图（16×16：4 格路网 + 三类分区 + 三档密度）
+// ---------------------------------------------------------------------------
+
+const config = createDefaultConfig();
+const state = createInitialState(config);
+
+let highContrast = false;
+let tokens = buildSemanticTokenMap(config.zoneTypes, { highContrast });
+
+const zoneIdOfIndex = (index) => (index < 2 ? (index === 0 ? 'EMPTY' : 'ROAD') : config.zoneTypes[index - 2] ?? 'UNKNOWN');
+
+for (let y = 0; y < 16; y++) {
+  for (let x = 0; x < 16; x++) {
+    const i = y * state.side + x;
+    state.cells.unlocked[i] = 1;
+    const onGrid = x % 4 === 0 || y % 4 === 0;
+    if (onGrid) {
+      state.cells.zone[i] = zoneIndex(config, 'ROAD');
+      continue;
+    }
+    const block = ((x >> 2) + (y >> 2)) % 3;
+    const zoneId = block === 0 ? 'R' : block === 1 ? 'C' : 'I';
+    state.cells.zone[i] = zoneIndex(config, zoneId);
+    state.cells.density[i] = onGrid ? 0 : ((x + y) % 3) + 1;
+    state.cells.inputVersion[i] = i + 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 相机：世界包围盒 + 固定三档缩放（P-01）
+// ---------------------------------------------------------------------------
+
+const canvas = document.getElementById('map');
+const ctx = canvas.getContext('2d');
+
+/**
+ * 世界包围盒与视口变换：**直接复用内核** `cellWorldBounds` / `fitTransform`
+ * （P-01：此前预览页自算锚点 (500,48) 导致 16×16 在 L1 被裁下缘且不居中；
+ *  现按包围盒居中，且切档保持视口中心不动——等价于以画布中心为锚点 zoomAround）。
+ */
+const bounds = cellWorldBounds(state.side, (gx, gy) => state.cells.unlocked[gy * state.side + gx] === 1);
+const boundsW = bounds.maxX - bounds.minX;
+const boundsH = bounds.maxY - bounds.minY;
+
+function transformFor(lod) {
+  return fitTransform(bounds, canvas.width, canvas.height, lod);
+}
+
+/**
+ * 指针坐标 → 世界坐标。
+ * P-02（T-126）：画布改用 CSS 缩放（`width:100%; height:auto`，内部坐标系仍 1060×740），
+ * `getBoundingClientRect()` 返回的是 **CSS 像素**，必须按 `canvas.width / rect.width`
+ * 换算回内部像素再拾取，否则缩放后点击会偏移（窄屏尤其明显）。
+ */
+function screenToWorld(lod, clientX, clientY, rect) {
+  const t = transformFor(lod);
+  const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+  const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+  return screenToWorldPoint({ x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY }, t);
+}
+
+const LODS = ['L0', 'L1', 'L2'];
+const urlLod = new URLSearchParams(window.location.search).get('lod');
+let lod = LODS.indexOf(urlLod) >= 0 ? urlLod : 'L0'; // P-01：默认 L0 全图概览
+let selected = null;
+
+// ---------------------------------------------------------------------------
+// 叠加层演示数据（状态 / 通勤形状）：**演示构造，不是模拟结果**
+// 真实链路里状态来自 P4 归因、通勤态来自 P2 求解（尚未接入 session）。
+// ---------------------------------------------------------------------------
+
+const overlaySpecs = [];
+{
+  const tokenOf = (id) => tokenById(tokens, id);
+  for (let gy = 0; gy < 16; gy++) {
+    for (let gx = 0; gx < 16; gx++) {
+      const i = gy * state.side + gx;
+      if (state.cells.zone[i] !== zoneIndex(config, 'ROAD')) continue;
+      if ((gx + gy) % 7 === 0) overlaySpecs.push({ cellIndex: i, layer: 'flow', token: tokenOf('flow.congested') });
+      else if ((gx + gy) % 5 === 0) overlaySpecs.push({ cellIndex: i, layer: 'flow', token: tokenOf('flow.slow') });
+    }
+  }
+  // 一处状态示例（预算警告）挂在一栋居住建筑上，演示 status 形状在 L1/L2 生效
+  for (let i = 0; i < state.side * state.side; i++) {
+    if (state.cells.zone[i] === zoneIndex(config, 'R') && state.cells.density[i] > 0) {
+      overlaySpecs.push({ cellIndex: i, layer: 'status', token: tokenOf('status.warning') });
+      break;
+    }
+  }
+}
+
+/** L1 形状内描边令牌：base.ink（渲染层不自造色值） */
+const outlineInk = { id: 'base.ink', color: tokenById(tokens, 'base.ink').color };
+
+function diamondPath(cx, cy, hw = CELL_W / 2, hh = CELL_H / 2) {
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + hw, cy + hh);
+  ctx.lineTo(cx, cy + 2 * hh);
+  ctx.lineTo(cx - hw, cy + hh);
+  ctx.closePath();
+}
+
+function zoneTokenOf(zoneIndexValue) {
+  const zoneId = zoneIdOfIndex(zoneIndexValue);
+  const t = tokens.zones['zone.' + zoneId];
+  return t ?? tokenById(tokens, 'base.tile');
+}
+
+/** 分区图案编码（圆点阵 / 45° 斜线 / 正交网格）——只用令牌 ink 色，不引入新色值 */
+function drawPattern(cx, cy, pattern, token) {
+  if (pattern === 'none') return;
+  ctx.save();
+  ctx.globalAlpha = tokens.patternAlpha; // A-05：18%（常规）/ 30%（高对比）
+  ctx.strokeStyle = token.ink;
+  ctx.fillStyle = token.ink;
+  ctx.lineWidth = 1.5;
+  if (pattern === 'dots') {
+    for (let dx = -32; dx <= 32; dx += 16) {
+      for (let dy = -8; dy <= 8; dy += 8) {
+        ctx.beginPath();
+        ctx.arc(cx + dx, cy + 24 + dy, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  } else if (pattern === 'diagonal-45') {
+    for (let k = -56; k <= 56; k += 14) {
+      ctx.beginPath();
+      ctx.moveTo(cx + k, cy + 8);
+      ctx.lineTo(cx + k + 24, cy + 40);
+      ctx.stroke();
+    }
+  } else if (pattern === 'grid-lines') {
+    for (let k = -32; k <= 32; k += 16) {
+      ctx.beginPath();
+      ctx.moveTo(cx + k, cy + 10);
+      ctx.lineTo(cx + k, cy + 38);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+  if (tokens.patternInkOutlineWidth > 0) {
+    // 高对比模式 1px 深色描边（M-093；占位实现：仍用令牌 ink 色，不引入新色值）
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = token.ink;
+    ctx.lineWidth = tokens.patternInkOutlineWidth;
+    diamondPath(cx, cy);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawSprite(s) {
+  const cx = s.x;
+  const cy = s.y;
+  if (s.kind === 'terrain') {
+    diamondPath(cx, cy);
+    ctx.fillStyle = tokenById(tokens, 'base.tile').color;
+    ctx.fill();
+    ctx.strokeStyle = tokenById(tokens, 'base.divider').color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    return;
+  }
+  if (s.kind === 'road') {
+    diamondPath(cx, cy);
+    ctx.fillStyle = tokenById(tokens, 'base.divider').color;
+    ctx.fill();
+    return;
+  }
+  // building：分区色顶面 + 两侧面（同色降透明度，不引入新色值）+ 图案叠层
+  const token = zoneTokenOf(state.cells.zone[s.cellIndex]);
+  // Q-4（T-129）：图集层 d1/d2/d3 = 64/128/192（1:2:3），预览高度同比取 20/40/60，体量差一致
+  const height = s.assetKey.endsWith('d3') ? 60 : s.assetKey.endsWith('d2') ? 40 : 20;
+  const hw = CELL_W / 2;
+  const hh = CELL_H / 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - hw, cy + hh);
+  ctx.lineTo(cx, cy + 2 * hh);
+  ctx.lineTo(cx, cy + 2 * hh - height);
+  ctx.lineTo(cx - hw, cy + hh - height);
+  ctx.closePath();
+  ctx.globalAlpha = 0.72;
+  ctx.fillStyle = token.color;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx + hw, cy + hh);
+  ctx.lineTo(cx, cy + 2 * hh);
+  ctx.lineTo(cx, cy + 2 * hh - height);
+  ctx.lineTo(cx + hw, cy + hh - height);
+  ctx.closePath();
+  ctx.globalAlpha = 0.86;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  diamondPath(cx, cy - height);
+  ctx.fillStyle = token.color;
+  ctx.fill();
+  ctx.strokeStyle = tokenById(tokens, 'base.canvas').color;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  drawPattern(cx, cy - height, token.pattern, token);
+}
+
+/**
+ * 叠加层绘制（T-129 / Q-1 裁定 A）：
+ * - L0：**不画任何形状**；通勤态以线宽 / 亮度表达（o.line 非空）；
+ * - L1 / L2：画形状（✓ / ! / ✕ / 锁 / ↑ / ↓），L1 额外用 `base.ink` 画 1px 内描边；
+ * - 状态类在 L0 无形状亦无线编码（远景态，由 DrawList.hiddenOverlayCount 计数）。
+ */
+function drawOverlay(o) {
+  const cx = o.x;
+  const cy = o.y + CELL_H * 0.5; // 菱形几何中心
+  if (o.line !== null) {
+    // L0 线宽 / 亮度编码
+    ctx.save();
+    ctx.globalAlpha = o.line.brightness;
+    ctx.strokeStyle = o.color;
+    ctx.lineWidth = o.line.widthScale * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - CELL_W * 0.28, cy);
+    ctx.lineTo(cx + CELL_W * 0.28, cy);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  if (!o.shapeVisible) return; // L0 的 status：形状关闭且无替代编码
+  const r = 11;
+  ctx.save();
+  ctx.strokeStyle = o.color;
+  ctx.fillStyle = o.color;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  if (o.shape === 'check') {
+    ctx.moveTo(cx - r * 0.8, cy);
+    ctx.lineTo(cx - r * 0.1, cy + r * 0.7);
+    ctx.lineTo(cx + r * 0.9, cy - r * 0.8);
+    ctx.stroke();
+  } else if (o.shape === 'exclamation') {
+    ctx.moveTo(cx, cy - r);
+    ctx.lineTo(cx, cy + r * 0.25);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy + r * 0.85, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (o.shape === 'cross') {
+    ctx.moveTo(cx - r * 0.75, cy - r * 0.75);
+    ctx.lineTo(cx + r * 0.75, cy + r * 0.75);
+    ctx.moveTo(cx + r * 0.75, cy - r * 0.75);
+    ctx.lineTo(cx - r * 0.75, cy + r * 0.75);
+    ctx.stroke();
+  } else if (o.shape === 'lock') {
+    ctx.moveTo(cx - r * 0.55, cy - r * 0.1);
+    ctx.lineTo(cx - r * 0.55, cy - r * 0.55);
+    ctx.lineTo(cx + r * 0.55, cy - r * 0.55);
+    ctx.lineTo(cx + r * 0.55, cy - r * 0.1);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 0.75, cy - r * 0.05);
+    ctx.lineTo(cx + r * 0.75, cy - r * 0.05);
+    ctx.lineTo(cx + r * 0.75, cy + r * 0.75);
+    ctx.lineTo(cx - r * 0.75, cy + r * 0.75);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (o.shape === 'arrow-up' || o.shape === 'arrow-down') {
+    const dir = o.shape === 'arrow-up' ? -1 : 1;
+    ctx.moveTo(cx, cy + dir * r * 0.9);
+    ctx.lineTo(cx, cy - dir * r * 0.9);
+    ctx.moveTo(cx - r * 0.55, cy - dir * r * 0.9 + dir * r * 0.5);
+    ctx.lineTo(cx, cy - dir * r * 0.9);
+    ctx.lineTo(cx + r * 0.55, cy - dir * r * 0.9 + dir * r * 0.5);
+    ctx.stroke();
+  } else {
+    ctx.arc(cx, cy, r * 0.6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (o.outline !== undefined) {
+    // L1 内描边：1px，颜色取 base.ink 令牌（不自造色值）
+    ctx.strokeStyle = o.outline.color;
+    ctx.lineWidth = o.outline.width;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function render() {
+  const vm = buildViewModel(state);
+  const drawList = buildDrawList(vm, VIRTUAL_ATLAS_MANIFEST, lod, { overlays: overlaySpecs, outlineInk });
+  const t = transformFor(lod);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = tokenById(tokens, 'base.canvas').color;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(t.zoom, 0, 0, t.zoom, t.tx, t.ty);
+
+  for (const s of drawList.sprites) drawSprite(s);
+  // 叠加层独立层（art-bible §3.3）：地形 / 建筑之后统一绘制
+  for (const o of drawList.overlays) drawOverlay(o);
+
+  if (selected !== null) {
+    const gx = selected % state.side;
+    const gy = Math.floor(selected / state.side);
+    const sprite = drawList.sprites.find((s) => s.cellIndex === selected && s.kind === 'terrain');
+    const cx = sprite !== undefined ? sprite.x : (gx - gy) * (CELL_W / 2);
+    const cy = sprite !== undefined ? sprite.y : (gx + gy) * (CELL_H / 2);
+    ctx.save();
+    ctx.strokeStyle = tokenById(tokens, 'status.selected').color;
+    ctx.lineWidth = 2 / t.zoom;
+    diamondPath(cx, cy);
+    ctx.stroke();
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = tokenById(tokens, 'status.selected').color;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  updatePanels(vm, drawList);
+}
+
+function updatePanels(vm, drawList) {
+  const baseline = DRAW_CALL_BASELINE[lod];
+  // P-02 自检：横向溢出（用于截图核验；无 DOM 桩环境下 documentElement 为桩，值无害）
+  const docEl = document.documentElement;
+  const noHScroll = docEl.scrollWidth <= docEl.clientWidth;
+  document.getElementById('summary').innerHTML =
+    'LOD <b>' + lod + '</b> · zoom ' + drawList.zoom + '× · 世界 ' + Math.round(boundsW) + '×' + Math.round(boundsH) + '（已居中）<br>' +
+    'tick ' + vm.tickId + ' · S=' + vm.S.toFixed(1) + ' · 议题 ' + vm.issueCount + '<br>' +
+    'sprite ' + drawList.spriteCount + ' · 跳过(缺帧) ' + drawList.skipped + '<br>' +
+    (selected === null ? '未选中格' : '选中格 ' + (selected % state.side) + ',' + Math.floor(selected / state.side)) +
+    '<br>布局：' + docEl.scrollWidth + ' / ' + docEl.clientWidth + (noHScroll ? '（无横向溢出 ✓）' : '（存在横向溢出 ✗）') +
+    '<br>叠加层：形状 ' + drawList.shapeSpriteCount + ' · 线宽/亮度 ' + drawList.lineEncodedCount + ' · 隐藏 ' + drawList.hiddenOverlayCount +
+    (drawList.shapeSpriteCount === 0 ? '（L0 不画形状，通勤态以线宽/亮度表达）' : '');
+
+  const depthRows = drawList.sprites.slice(0, 14).map((s) => {
+    return '<li>#' + s.index + ' (' + s.gx + ',' + s.gy + ') ' + s.kind + ' · <code>' + s.frameKey + '</code> <span class="tag">' + s.atlasId + '</span></li>';
+  });
+  document.getElementById('depthList').innerHTML = depthRows.join('');
+
+  const batchRows = drawList.batches
+    .map((b) => '<li><code>' + b.atlasId + '</code> × ' + b.sprites.length + '</li>')
+    .join('');
+  document.getElementById('batchInfo').innerHTML =
+    '批次(= 估算 DrawCall) <b>' + drawList.estimatedDrawCalls + '</b> · 建议基线 L0≤30 / L1≤60–80 / L2≤120（当前 ' + lod + ' 基线 ' + baseline + '）<br>' +
+    '<span class="muted">估算值，非实测；不作门禁</span><ul>' + batchRows + '</ul>';
+
+  const loadSet = resolveLoadSet(config.zoneTypes, lod, VIRTUAL_ATLAS_MANIFEST);
+  const mark = (id) => (loadSet.deferredCould.indexOf(id) >= 0 ? id + '（Could 预留，MVP 不加载）' : id);
+  document.getElementById('loadSet').innerHTML =
+    '<b>常驻</b> ' + loadSet.resident.join(' / ') + '<br>' +
+    '<b>按需</b> ' + loadSet.onDemand.map(mark).join(' / ') + '<br>' +
+    '<b>排除</b> ' + loadSet.excluded.map(mark).join(' / ') + '<br>' +
+    '<b>非图集</b> ' + loadSet.nonAtlas.join(' / ') + '<br>' +
+    '<span class="muted">未激活分区不进常驻 / 按需（切 LOD 不卸载建筑图集）；天气 / 昼夜窗光属 Could 预留，本页不绘制</span>';
+
+  const worldCaps = { astc: false, etc2: true, rgb565: true };
+  const w = probeTextureFormat(worldCaps, true);
+  const ui = probeUiTextureFormat(worldCaps);
+  document.getElementById('formatInfo').innerHTML =
+    '世界资产 → <b>' + w.chosen + '</b>（degraded=' + w.degraded + '）· ' + w.reason + '<br>' +
+    'UI 图集 → <b>' + ui.chosen + '</b> · ' + ui.reason + '<br>' +
+    '<span class="muted">模拟能力：ASTC 不支持，走 ETC2 回退（真实能力随真机校准）</span>';
+
+  document.getElementById('a11yInfo').innerHTML =
+    '高对比模式 <b>' + (tokens.highContrast ? '开' : '关') + '</b> · 图案不透明度 ' + Math.round(tokens.patternAlpha * 100) + '%' +
+    ' · 图案描边 ' + tokens.patternInkOutlineWidth + 'px<br>' +
+    '<span class="muted">常规 18%（art-bible §3.2）；高对比 30% + 1px 深色描边（M-093）。默认关闭，视觉与 T-118 一致</span>';
+}
+
+function syncLodButtons() {
+  document.querySelectorAll('#lodRow button[data-lod]').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.lod === lod));
+  });
+}
+
+document.querySelectorAll('#lodRow button[data-lod]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    lod = btn.dataset.lod;
+    syncLodButtons();
+    render();
+  });
+});
+
+const overviewBtn = document.getElementById('overviewBtn');
+if (overviewBtn !== null) {
+  overviewBtn.addEventListener('click', () => {
+    lod = 'L0'; // 概览：回到全图（视口中心世界点不变）
+    syncLodButtons();
+    render();
+  });
+}
+
+const contrastToggle = document.getElementById('highContrast');
+if (contrastToggle !== null) {
+  contrastToggle.addEventListener('change', () => {
+    highContrast = contrastToggle.checked;
+    tokens = buildSemanticTokenMap(config.zoneTypes, { highContrast });
+    render();
+  });
+}
+
+canvas.addEventListener('click', (ev) => {
+  const rect = canvas.getBoundingClientRect();
+  const p = screenToWorld(lod, ev.clientX, ev.clientY, rect);
+  const hit = pickCell(p.x, p.y);
+  if (hit.gx < 0 || hit.gy < 0 || hit.gx >= state.side || hit.gy >= state.side) {
+    selected = null;
+  } else {
+    selected = hit.gy * state.side + hit.gx;
+  }
+  render();
+});
+
+// 双击回 L1（art-bible §2.2；不改变视口中心对应的世界点）
+canvas.addEventListener('dblclick', () => {
+  lod = 'L1';
+  syncLodButtons();
+  render();
+});
+
+syncLodButtons();
+render();
+
+})();
+</script>
+</body>
+</html>

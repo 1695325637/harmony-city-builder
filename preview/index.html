@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HC-01 · S-06 等距渲染预览（占位）</title>
+<!--
+  色值说明（A-12 登记）：本页 CSS 的 6 个色板副本 + 3 个横幅装饰色**仅用于预览页**，
+  禁止进入游戏 UI；游戏侧一律经 SemanticTokenMap 取色。理想形态是由令牌生成 CSS 变量，
+  本轮不改（登记为低优先，见 render-s06-verification.md §8）。
+
+  布局说明（T-126 / P-02）：`#stage` + `aside` 用 flex-wrap 弹性排布；
+  画布 CSS `width:100%; height:auto`（内部坐标系固定 1060×740，CSS 仅缩放显示尺寸），
+  ≥1024 宽不产生横向滚动；窄屏时面板换行到画布下方而非被裁切。
+  拾取换算已同步补正（app.mjs 的 screenToWorld 用 rect 缩放回内部像素）。
+-->
+<style>
+  :root {
+    /* 与 src/render/semantic-tokens.ts 的 BASE 色板一致（预览页副本，非游戏用色源） */
+    --canvas: #f4f6f8;
+    --panel: #f7f8fa;
+    --divider: #dce2e8;
+    --ink: #1b2430;
+    --ink2: #5a6675;
+    --primary: #2e6be6;
+    /* 横幅装饰色：仅预览页，禁止进入游戏 UI */
+    --warn-bg: #fff3cd;
+    --warn-line: #e6d08a;
+    --warn-ink: #6b4e00;
+  }
+  * { box-sizing: border-box; }
+  html, body { max-width: 100%; }
+  body {
+    margin: 0;
+    font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: var(--ink);
+    background: var(--canvas);
+  }
+  #banner {
+    position: sticky; top: 0; z-index: 10;
+    padding: 8px 12px; background: var(--warn-bg); border-bottom: 1px solid var(--warn-line);
+    color: var(--warn-ink); font-weight: 600; letter-spacing: .2px;
+  }
+  main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px;
+    align-items: flex-start;
+    max-width: 100%;
+  }
+  #stage {
+    flex: 1 1 640px;
+    min-width: 0;
+    max-width: 100%;
+    background: var(--canvas);
+    border: 1px solid var(--divider);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  /* 内部坐标系为 1060×740（canvas width/height 属性）；CSS 只缩放显示尺寸 */
+  canvas { display: block; width: 100%; height: auto; max-width: 100%; }
+  aside {
+    flex: 1 1 380px;
+    min-width: 0;
+    max-width: 460px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  section { background: var(--panel); border: 1px solid var(--divider); border-radius: 8px; padding: 10px 12px; }
+  h2 { font-size: 13px; margin: 0 0 6px; color: var(--ink); }
+  h2 small { color: var(--ink2); font-weight: 400; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--divider); background: #fff; cursor: pointer; }
+  button[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+  label.toggle { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  ol, ul { margin: 4px 0 0; padding-left: 18px; }
+  li { font-variant-numeric: tabular-nums; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  .muted { color: var(--ink2); }
+  .tag { display: inline-block; padding: 0 6px; border: 1px solid var(--divider); border-radius: 999px; font-size: 11px; color: var(--ink2); }
+  /* P-02：≤1024 宽时面板整体换行到画布下方，避免横向裁切 */
+  @media (max-width: 1024px) {
+    main { flex-direction: column; }
+    #stage { flex: 1 1 auto; width: 100%; }
+    aside { flex: 1 1 auto; max-width: 100%; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div id="banner">占位色块预览（非最终美术）· Cocos 适配未验证 · 绘制数据为程序化占位</div>
+<main>
+  <div id="stage">
+    <canvas id="map" width="1060" height="740" aria-label="16×16 等距地图预览（默认 L0 全图概览）"></canvas>
+  </div>
+  <aside>
+    <section>
+      <h2>LOD 档位 <small>（固定三档，无连续缩放）</small></h2>
+      <div class="row" id="lodRow">
+        <button data-lod="L0" aria-pressed="true">L0 · 0.5×</button>
+        <button data-lod="L1">L1 · 1.0×</button>
+        <button data-lod="L2">L2 · 2.0×</button>
+        <button id="overviewBtn" title="回到 L0 全图概览">概览</button>
+      </div>
+      <p class="muted" style="margin:6px 0 0">默认 L0 全图概览（世界包围盒居中）；<code>?lod=L0|L1|L2</code> 可直接指定档位；双击画布回 L1；点击任意格可拾取。</p>
+      <p class="muted" style="margin:4px 0 0"><b>LOD 叠加层口径</b>：L0 不画状态形状，通勤态以线宽 / 亮度表达；形状在 L1 / L2 生效（L1 形状带 1px <code>base.ink</code> 内描边）。</p>
+    </section>
+    <section>
+      <h2>绘制概览</h2>
+      <div id="summary" class="mono"></div>
+    </section>
+    <section>
+      <h2>深度绘制顺序 <small>（前 14 条，gx+gy → gx 平局）</small></h2>
+      <ol id="depthList" class="mono"></ol>
+    </section>
+    <section>
+      <h2>批次 / DrawCall 估算 <small>（建议基线，非承诺值）</small></h2>
+      <div id="batchInfo" class="mono"></div>
+    </section>
+    <section>
+      <h2>图集加载集 <small>（按激活分区集 + LOD）</small></h2>
+      <div id="loadSet" class="mono"></div>
+    </section>
+    <section>
+      <h2>可访问性 <small>（高对比模式预留，M-093）</small></h2>
+      <div class="row" style="margin-bottom:6px">
+        <label class="toggle"><input type="checkbox" id="highContrast" /> 高对比模式（图案 30% + 1px 描边）</label>
+      </div>
+      <div id="a11yInfo" class="mono"></div>
+    </section>
+    <section>
+      <h2>纹理格式探测 <small>（模拟能力，非真机）</small></h2>
+      <div id="formatInfo" class="mono"></div>
+    </section>
+  </aside>
+</main>
+<script type="module" src="./app.mjs"></script>
+</body>
+</html>
