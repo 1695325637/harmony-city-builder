@@ -26,11 +26,11 @@
 | --- | --- | --- |
 | `src/core/types.ts` | 247 | 共享类型、14 条共享数据字典、P0~P8 阶段常量、R1~R7 阶段映射、命令 / 事件 / 状态结构、`canonicalize` / `hashString` |
 | `src/core/schema.ts` | 306 | 网格 / 分区 / 预算 / 双帧 schema，`schemaVersion`，`>32×32` 显式拒绝，序列化回环；**T-116：`deserializeState` 实参化 + 强制 `assertConfigCompatible`（D-01 修复点 1）** |
-| `src/core/config.ts` | 204 | `Config` / `PLACEHOLDER_DEFAULTS` / `createDefaultConfig` / `computeConfigHash` / 可注入聚合器 / 版本兼容断言 |
+| `src/core/config.ts` | 242 | `Config` / `PLACEHOLDER_DEFAULTS` / `createDefaultConfig` / `computeConfigHash` / 可注入聚合器 / 版本兼容断言 / **T-133 三态阈值键 `flowClearMaxQOverCap` `flowSlowMaxQOverCap`（占位，AC-T8 ④ 不进计分链）+ `assertTrafficThresholds`** |
 | `src/simulation/commands.ts` | 90 | `makeCommand`、`CommandQueue`（幂等键）、`InputGate` |
-| `src/simulation/traffic.ts` | 302 | 最小可注入通勤求解：连通块合并（B ≤ 64）+ ROAD 图 BFS + 拥堵单调 + 不可达 / 除零兜底 |
-| `src/simulation/snapshot.ts` | 256 | **T-116 最小内存实现**：`buildTickSnapshot` + `createInMemorySnapshotStore`（Keyframe/Delta 规则、冷归档恢复走 `deserializeState`、D-01 联动；介质为内存模拟，持久化留 S-05/S-09） |
-| `src/simulation/tick-pipeline.ts` | 442 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames` |
+| `src/simulation/traffic.ts` | 335 | 最小可注入通勤求解：连通块合并（B ≤ 64）+ ROAD 图 BFS + 拥堵单调 + 不可达 / 除零兜底；**T-133 `FlowStateEnum` / `classifyFlowState`（§4 钳制后逐边 q/cap 分档，纯函数）+ `TrafficResult.flowState`（与 qOverCap 同长、逐边对齐）** |
+| `src/simulation/snapshot.ts` | 258 | **T-116 最小内存实现**：`buildTickSnapshot` + `createInMemorySnapshotStore`（Keyframe/Delta 规则、冷归档恢复走 `deserializeState`、D-01 联动；介质为内存模拟，持久化留 S-05/S-09）；**T-133 `TickSnapshot.flowState` 标 `pending:S-05`（纯视觉派生，渲染层下发图例即可，不进冷归档）** |
+| `src/simulation/tick-pipeline.ts` | 446 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）** |
 | `src/simulation/session.ts` | 100 | 编排层 `createSimulation`：仅 `advanceDay`（V6）触发结算，连点幂等，结算中 gate 锁定；**T-116：入口 `assertConfigCompatible`（D-01 修复点 2）** |
 | `src/index.ts` | 15 | 统一导出 |
 | `tests/unit/*.test.ts` | 869 | 8 个测试文件 / 51 条断言用例（7 文件 45 条基线 + `d01-config-compat.test.ts` 6 条 D-01 回归，见 §4） |

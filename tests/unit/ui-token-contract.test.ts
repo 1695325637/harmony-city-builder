@@ -109,20 +109,19 @@ test('TOKEN-CONTRACT-3 落位 / 回滚编码必须是指定令牌；拆除按「
   assert.equal(placement.encoding.tokenId, 'status.positive', '合法落位预览必须用 status.positive（art-bible §8.3 合法绿）');
   assert.equal(rollback.encoding.tokenId, 'status.negative', '回滚负向反馈必须用 status.negative（S-07 验收②）');
 
-  // ⚠️ 本门禁在 2026-11-06 发现一处**层 ↔ 策略分歧**（已上报 team-lead，不在本批改行为）：
-  //   - `motion-policy.ts` 的 TOKEN_OF.demolition = 'status.warning'（策略层声明拆除用提示色）；
-  //   - `optimistic-view.ts` 的 apply() 只按「可用性预检」取色 → 合法拆除拿到 'status.positive'。
-  // 裁定前此处只设防「不得回落」，不把分歧中的任一侧写成契约（否则等于用测试固化未决问题）。
+  // 拆除：主理人 2026-11-06 裁定 ①「叠加层对齐策略层」后为**精确断言**（不再"两者之一"）。
+  // 依据：§8.3 对拆除只写「去饱和 + 收缩」、未给合法性配色；拆除是破坏性动作，
+  // 用 status.warning 才能与落位（status.positive 绿）在同一屏内区分。
+  // 叠加层与策略层必须同一个答案（门禁同时钉两侧，防止只改一边）。
+  assert.equal(demolition.encoding.tokenId, 'status.warning', '合法拆除预览必须用 status.warning（破坏性动作提示色）');
   assert.equal(
     createMotionPolicy({ tokens }).immediate('demolition').encoding.tokenId,
     'status.warning',
-    '策略层：拆除声明必须用 status.warning',
+    '策略层：拆除声明必须与叠加层一致（status.warning）',
   );
-  assert.equal(
-    demolition.encoding.tokenId === 'status.positive' || demolition.encoding.tokenId === 'status.warning',
-    true,
-    '叠加层拆除编码必须是两个合法预览令牌之一（不得是其它值 / 兜底值）',
-  );
+  // 非法拆除仍走负向（可用性预检结论优先）
+  const illegalDemolition = layer.apply(makeCommand.zone('d2', 9, 3, 3, 'EMPTY', 0), { legality: 'illegal' });
+  assert.equal(illegalDemolition.encoding.tokenId, 'status.negative', '非法拆除必须用 status.negative');
 
   for (const [name, encoding] of [
     ['落位', placement.encoding],

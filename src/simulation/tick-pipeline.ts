@@ -55,6 +55,8 @@ export interface TickResult {
   cycleOutcome: CycleOutcome;
   /** P4 结束时记录的 S_t，用于验证 P7 未回写满意度 */
   p4Satisfaction: number;
+  /** 流线三态枚举（GDD 03 §3.5）：与 TrafficResult.flowState 同义，供 UI / 渲染消费 */
+  flowState: ('clear' | 'slow' | 'congested')[];
   ruleStages: Record<string, StageId>;
 }
 
@@ -113,6 +115,7 @@ export function createTickWorkspace(config: Config, side: number): TickWorkspace
     commandTrace: [],
     cycleOutcome: 'IN_CYCLE',
     p4Satisfaction: 0,
+    flowState: [],
     ruleStages: RULE_TO_STAGE,
   };
   return {
@@ -406,6 +409,7 @@ export function runTick(
   out.commandTrace = ws.commandTrace;
   out.cycleOutcome = outcome;
   out.p4Satisfaction = p4S;
+  out.flowState = traffic.flowState;
   return out;
 }
 

@@ -57,6 +57,8 @@ export interface TickSnapshot {
   /** 本 tick 应用的命令溯源（含幂等键） */
   commandTrace: readonly string[];
   stage: StageId;
+  // pending:S-05 —— flowState（流线三态枚举，GDD 03 §3.5）暂不在快照结构中承载：
+  // 它是纯视觉派生量，渲染层随图例条目下发即可，无需进冷归档；待 S-05 / S-09 视存储需求再定。
 }
 
 /**

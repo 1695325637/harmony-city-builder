@@ -124,3 +124,32 @@ test('MOT-7 集成：减少动态效果下按压事件的载荷仍含非空静�
   // 世界动效声明同样全 false（同一策略对象供渲染层读取）
   assert.deepEqual(ui.motion.effects(), { loops: false, particles: false, cameraEase: false });
 });
+
+/**
+ * D-13：当语义令牌的 `shape === 'none'`（如 `status.selected` 仅描边不画形状，
+ * low-end / 形状门控场景），反馈通道**不计 `shape`**，改计 `outline`，保证降级后
+ * 通道数 ≥ 2（信息不丢失）。有真实形状（如 `status.positive`）仍计 `shape`、不计 `outline`。
+ */
+test('MOT-8 D-13 形状为 none 时通道用 outline 替代 shape，且通道数 ≥2', () => {
+  const normal = createMotionPolicy({ tokens });
+  const reduced = createMotionPolicy({ tokens, reducedMotion: true });
+
+  // select / press 用 status.selected（shape='none'）→ 通道含 outline、不含 shape
+  for (const kind of ['select', 'press'] as ImmediateFeedbackKind[]) {
+    for (const p of [normal, reduced]) {
+      const spec = p.immediate(kind);
+      assert.equal(spec.encoding.shape, 'none', kind + ' 编码形状态为 none');
+      assert.equal(spec.channels.indexOf('shape') < 0, true, kind + '（none 形状）不计 shape 通道');
+      assert.equal(spec.channels.indexOf('outline') >= 0, true, kind + '（none 形状）改计 outline 通道');
+      assert.equal(spec.channels.length >= 2, true, kind + ' 通道数 ≥2（信息不丢失）');
+    }
+  }
+
+  // 对照：placement 用 status.positive（有真实形状）→ 计 shape、不计 outline
+  for (const p of [normal, reduced]) {
+    const spec = p.immediate('placement');
+    assert.notEqual(spec.encoding.shape, 'none', 'placement 有真实形状');
+    assert.equal(spec.channels.indexOf('shape') >= 0, true, '有形状时计 shape 通道');
+    assert.equal(spec.channels.indexOf('outline') < 0, true, '有形状时不计 outline 通道');
+  }
+});

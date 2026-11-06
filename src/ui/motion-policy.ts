@@ -53,8 +53,17 @@ export interface MotionEffects {
   readonly cameraEase: boolean;
 }
 
-/** 反馈通道（多通道反馈：单一通道失效时信息仍可达，ux-spec UX-A17） */
-export type FeedbackChannelKind = 'color' | 'shape' | 'text' | 'motion';
+/**
+ * 反馈通道（多通道反馈：单一通道失效时信息仍可达，ux-spec UX-A17）。
+ * - `color` / `text`：主通道；
+ * - `shape`：形状通道（L1/L2 生效，低档 / 形状门控时可能降级为 `none`）；
+ * - `motion`：动效通道（减少动态效果时移除）；
+ * - `outline`：**D-13 新增**——当 `shape === 'none'`（low-end / 形状门控）时，
+ *   以「描边」作为形状通道的替代，保证 `channels ≥ 2` 不退化成单通道（信息不丢失）。
+ *   依据：art-bible §8.3「选中地块 2px 描边」+ ADR-004「多通道反馈」；team-lead 2026-11-06 裁定
+ *   （D-13 采「channels 增 outline、shape==='none' 时不计 shape」方案，保持 outlineWidthPx 单一出口）。
+ */
+export type FeedbackChannelKind = 'color' | 'shape' | 'text' | 'motion' | 'outline';
 
 export type ImmediateFeedbackMode = 'animated' | 'static-outline' | 'static-press-color';
 
@@ -179,22 +188,36 @@ export function createMotionPolicy(deps: MotionPolicyDeps): MotionPolicy {
     },
     immediate(kind: ImmediateFeedbackKind): ImmediateFeedbackSpec {
       const encoding = encodingOf(tokens, TOKEN_OF[kind], TOKEN_FALLBACK);
+      // D-13：形状门控 / low-end 下 `shape === 'none'`（如 `status.selected` 仅描边不画形状），
+      // 此时不以 `shape` 计通道，改计 `outline`，保证降级后 `channels ≥ 2`（信息不丢失）。
+      const baseChannels = reduced ? CHANNELS_STATIC : CHANNELS_ANIMATED;
+      const channels: readonly FeedbackChannelKind[] =
+        encoding.shape === 'none'
+          ? Object.freeze(baseChannels.filter((c) => c !== 'shape').concat('outline'))
+          : baseChannels;
       return Object.freeze({
         kind,
         mode: reduced ? STATIC_MODE[kind] : ('animated' as const),
         durationMs: reduced ? 0 : DURATION_OF[kind],
         encoding,
         outlineWidthPx: OUTLINE_WIDTH_PX,
-        channels: reduced ? CHANNELS_STATIC : CHANNELS_ANIMATED,
+        channels,
         informationLost: false as const,
       });
     },
     tickFeedback(): TickFeedbackSpec {
+      const encoding = encodingOf(tokens, 'base.ink', 'base.tile');
+      const baseChannels = reduced ? CHANNELS_STATIC : CHANNELS_ANIMATED;
+      const channels: readonly FeedbackChannelKind[] =
+        encoding.shape === 'none'
+          ? Object.freeze(baseChannels.filter((c) => c !== 'shape').concat('outline'))
+          : baseChannels;
       return Object.freeze({
         mode: reduced ? ('instant' as const) : ('animated' as const),
         durationMs: reduced ? 0 : DURATION_SLOW_MS,
         // 数值变化用文字 / 数值色（art-bible §8.3「数值滚动」），静态时直变
-        encoding: encodingOf(tokens, 'base.ink', 'base.tile'),        channels: reduced ? CHANNELS_STATIC : CHANNELS_ANIMATED,
+        encoding,
+        channels,
         informationLost: false as const,
       });
     },

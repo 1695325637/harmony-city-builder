@@ -14,11 +14,15 @@ import { ZONE_EMPTY_INDEX, ZONE_ROAD_INDEX, type CityState } from '../core/types
 import { clamp, safeDiv, type Config } from '../core/config.ts';
 import { zoneIndex } from '../core/schema.ts';
 
+export type FlowStateEnum = 'clear' | 'slow' | 'congested';
+
 export interface TrafficResult {
   T_c: number;
   t_g: Float64Array;
   d: Float64Array;
   qOverCap: Float64Array;
+  /** 流线三态枚举（GDD 03 §3.5）：与 `qOverCap` 同长、逐边对齐，纯视觉派生量 */
+  flowState: FlowStateEnum[];
   unreachable: boolean;
   blocks: number;
   /** 环境负荷 E（LU），由通勤图距离聚合，供 01 的 f_e */
@@ -29,6 +33,24 @@ export interface TrafficResult {
   /** P2 产物：Σ P_b × a_b 与 Σ P_b，供 P3 复用计算 f_s */
   serviceWeightedAccess: number;
   serviceWeightTotal: number;
+}
+
+/**
+ * 流线三态分类（GDD 03 §3.5.2）：唯一真源在模拟层 P2。
+ * 基准 = §4 钳制后的逐边饱和度 `qOverCap`（已落在 [0, (q/cap)_max]）；
+ * 分类只决定 `flowState` 的分档位置，**绝不进入 T_c / f_c / f_s / S 计分链**（AC-T8 ④）。
+ *
+ * 开闭性（写死，便于断言）：
+ *   q/cap >  θ_slow        → 'congested'
+ *   θ_clear < q/cap ≤ θ_slow → 'slow'
+ *   q/cap ≤  θ_clear        → 'clear'
+ *
+ * 纯函数、确定性：同输入同输出，无 NaN（qOverCap 已在 §4 钳制为有限值）。
+ */
+export function classifyFlowState(qOverCap: number, config: Config): FlowStateEnum {
+  if (qOverCap > config.flowSlowMaxQOverCap) return 'congested';
+  if (qOverCap > config.flowClearMaxQOverCap) return 'slow';
+  return 'clear';
 }
 
 export interface TrafficWorkspace {
@@ -83,6 +105,7 @@ export function createTrafficWorkspace(side: number, config: Config): TrafficWor
       t_g,
       d,
       qOverCap,
+      flowState: [],
       unreachable: false,
       blocks: 0,
       E: 0,
@@ -298,5 +321,15 @@ export function solveTraffic(state: CityState, config: Config, ws: TrafficWorksp
   r.T_c = demand > 0 ? clamp(safeDiv(weighted, demand, 0, config.epsilon), 0, config.T_max) : 0;
   r.blocks = ws.blockCount;
   if (r.unreachable && demand > 0) r.T_c = config.T_max;
+
+  // ---- ④ 流线三态枚举（GDD 03 §3.5）：与 qOverCap 同长、逐边对齐 ----
+  // 分类基准 = §4 钳制后的逐边饱和度（已落 [0, (q/cap)_max]）；
+  // **只决定视觉分档位置，绝不进入 T_c / f_c / f_s / S 计分链**（AC-T8 ④）。
+  // 未写入的边（qOverCap = 0）→ 'clear'（无流量即畅通，属诚实结果）。
+  const fs: FlowStateEnum[] = new Array(ws.qOverCap.length);
+  for (let i = 0; i < ws.qOverCap.length; i++) {
+    fs[i] = classifyFlowState(ws.qOverCap[i], config);
+  }
+  r.flowState = fs;
   return r;
 }

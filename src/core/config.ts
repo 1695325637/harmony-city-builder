@@ -65,6 +65,17 @@ export interface Config {
   gamma: number;
   cap: number;
   qcapMax: number;
+  /**
+   * 三态分类阈值 θ_clear（占位，非平衡值）。
+   * 仅用于 `flowState` 视觉分档，严禁进入 `T_c` / `f_c` / `f_s` / `S` 计分链（AC-T8 ④ / GDD 03 §3.5.2）。
+   * 真实取值「平衡期定，S-12 前钉定；由配置表注入」（GDD 03 §8.1 O-5）。
+   */
+  flowClearMaxQOverCap: number;
+  /**
+   * 三态分类阈值 θ_slow（占位，非平衡值）。约束 `0 < θ_clear < θ_slow ≤ qcapMax`。
+   * 仅用于视觉分档，不进计分链（AC-T8 ④）。
+   */
+  flowSlowMaxQOverCap: number;
   epsilon: number;
   maxBlocks: number;
   /** 归因型条目的最小贡献阈值（占位） */
@@ -114,6 +125,11 @@ export const PLACEHOLDER_DEFAULTS: Config = {
   gamma: 1,
   cap: 10,
   qcapMax: 4,
+  // 三态分类阈值占位：刻意取明显中性数（0.5 / 0.8），**非平衡结论**。
+  // 约束 0 < θ_clear(0.5) < θ_slow(0.8) ≤ qcapMax(4)。真实取值平衡期定、S-12 前钉定、由配置表注入。
+  // 这两个键只驱动 flowState 分档，绝不进入 T_c / f_c / f_s / S 的计分链（AC-T8 ④）。
+  flowClearMaxQOverCap: 0.5, // <θ_clear> 占位
+  flowSlowMaxQOverCap: 0.8, // <θ_slow> 占位
   epsilon: 1e-9,
   maxBlocks: 64,
   attributionThreshold: 0,
@@ -122,7 +138,7 @@ export const PLACEHOLDER_DEFAULTS: Config = {
 };
 
 export function createDefaultConfig(overrides: Partial<Config> = {}): Config {
-  return {
+  const config: Config = {
     ...PLACEHOLDER_DEFAULTS,
     ...overrides,
     meta: overrides.meta ?? PLACEHOLDER_DEFAULTS.meta,
@@ -130,6 +146,28 @@ export function createDefaultConfig(overrides: Partial<Config> = {}): Config {
     densityCoefficients: overrides.densityCoefficients ?? [...PLACEHOLDER_DEFAULTS.densityCoefficients],
     zoneTypes: overrides.zoneTypes ?? [...PLACEHOLDER_DEFAULTS.zoneTypes],
   };
+  // 占位阈值配置校验：0 < θ_clear < θ_slow ≤ (q/cap)_max（GDD 03 §3.5.2 约束；违反即非法配置）
+  assertTrafficThresholds(config);
+  return config;
+}
+
+/**
+ * 三态阈值配置校验（GDD 03 §3.5.2）：`0 < θ_clear < θ_slow ≤ qcapMax`。
+ * 这两个键只用于视觉分档，不进计分链；校验失败意味着配置非法，立即在构造期暴露。
+ */
+export function assertTrafficThresholds(config: Config): void {
+  const clear = config.flowClearMaxQOverCap;
+  const slow = config.flowSlowMaxQOverCap;
+  const max = config.qcapMax;
+  if (!(clear > 0)) {
+    throw new Error('flowClearMaxQOverCap 必须 > 0（占位阈值非法）');
+  }
+  if (!(clear < slow)) {
+    throw new Error('flowClearMaxQOverCap 必须 < flowSlowMaxQOverCap（占位阈值非法）');
+  }
+  if (!(slow <= max)) {
+    throw new Error('flowSlowMaxQOverCap 必须 ≤ qcapMax（与 §4 钳制上界一致）');
+  }
 }
 
 /** 配置内容哈希：任一字段变化必升 hash（S-02 验收 2 / ADR-003 R-6） */

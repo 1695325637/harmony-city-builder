@@ -149,6 +149,16 @@ test('SCAN-10 本层文件清单固定（防越界新增 / 防误把预览页或
   assert.deepEqual(names, [
     'feedback-bus.ts',
     'feedback-timing.ts',
+    // —— S-08 竖屏 HUD 子模块（src/ui/hud/**），按字典序排在 index.ts 之前 ——
+    'hud/a11y.ts',
+    'hud/budget-panel.ts',
+    'hud/build-tabs.ts',
+    'hud/end-day-button.ts',
+    'hud/hud-view-model.ts',
+    'hud/index.ts',
+    'hud/layout-profile.ts',
+    'hud/legend.ts',
+    'hud/types.ts',
     'index.ts',
     'interaction-controller.ts',
     'motion-policy.ts',

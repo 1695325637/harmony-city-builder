@@ -20,6 +20,7 @@ export * from './optimistic-view.ts';
 export * from './interaction-controller.ts';
 export * from './motion-policy.ts';
 export * from './feedback-timing.ts';
+export * from './hud/index.ts';
 
 // ---------------------------------------------------------------------------
 // 层间契约的唯一落点（D-14）——**实现文件不得 import `Simulation`**

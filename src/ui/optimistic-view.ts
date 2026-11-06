@@ -163,6 +163,19 @@ function legalityTokenId(legality: PreviewLegality): string {
 }
 
 /**
+ * 预览编码选择（主理人 2026-11-06 裁定 ①：叠加层对齐策略层）：
+ * - 落位：合法 → `status.positive`（合法绿 ✓）/ 非法 → `status.negative` / 未知 → `status.warning`；
+ * - 拆除：合法 → `status.warning`（提示色，破坏性动作）/ 非法 → `status.negative`。
+ * 与 `motion-policy.ts` 的 `TOKEN_OF.placement / .demolition` 一一对应（不得各写一套）。
+ */
+function previewTokenId(kind: OverlayKind, legality: PreviewLegality): string {
+  if (kind === 'demolition') {
+    return legality === 'illegal' ? 'status.negative' : 'status.warning';
+  }
+  return legalityTokenId(legality);
+}
+
+/**
  * 令牌 id：纯视觉交互态（选中 / Tab / 面板 / 按压）。
  * 用状态组 `status.selected`（主色 + 「选中 / 焦点」标签），**不假设存在 `base.primary`**
  * ——渲染层正在做令牌唯一化（(color, shape) 全局唯一），基础组可能只保留中性色；
@@ -220,7 +233,12 @@ export function createOptimisticLayer(deps: OptimisticLayerDeps): OptimisticLaye
         density: command.density,
         amountCU: command.amountCU,
         zoneTokenId: zoneTokenIdFor(command.zoneId),
-        encoding: encodingOf(tokens, legalityTokenId(legality)),
+        // 拆除是**破坏性动作**：合法拆除用 status.warning（提示色），与落位（status.positive 合法绿）
+        // 在同一屏内可区分——否则缩略比例下玩家会误判自己在建还是在拆。
+        // 依据：art-bible §8.3 对拆除只写「去饱和 + 收缩」、未指定合法性配色；
+        // 主理人 2026-11-06 裁定采「叠加层对齐策略层（motion-policy TOKEN_OF.demolition）」，
+        // 该口径待 art 侧登记为口径 5；门禁：ui-token-contract TC-3 精确断言。
+        encoding: encodingOf(tokens, previewTokenId(kind, legality)),
         legality,
         mutatesAuthority: true,
       });
