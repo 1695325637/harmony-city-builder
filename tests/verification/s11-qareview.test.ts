@@ -382,7 +382,10 @@ test('QAH-9 既有 render 契约不被解锁破坏：写格必 bump 且 6 个 re
   const expected: Record<string, number> = {
     'src/render/iso.ts': 175,
     'src/render/view-model.ts': 158,
-    'src/render/semantic-tokens.ts': 323,
+    // S-12 已授权变更（2026-11-07）：+24 行 = AA_TEXT_THRESHOLD + textSafe 接口/实算 +
+    // inkWeak label 降级。原钉 323（T-139 快照）——行数守卫的目的是抓「未授权」渲染层改动，
+    // 授权变更走 README §2.1 计数同步 + 本处显式更新，不静默改。
+    'src/render/semantic-tokens.ts': 347,
     'src/render/atlas.ts': 458,
     'src/render/asset-naming.ts': 343,
     'src/render/draw-list.ts': 334,

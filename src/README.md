@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | `src/render/iso.ts` | 175 | 2:1 dimetric 投影（128×64、菱形顶角锚点）、`screenToGrid` 逆变换、`pickCell`、`depthKey`/`compareDepth`（唯一深度规则）、`ZOOM` 三档固定缩放 + `zoomAround` 锚点保持 |
 | `src/render/view-model.ts` | 158 | 只读 VM（cells 零拷贝 + 结构冻结 + `changeStamp` 4KB 版本戳快照）、`diffViewModel`（**格级**信号，见下）、`isViewModelFrozen` |
-| `src/render/semantic-tokens.ts` | 323 | **唯一 hex 色源**：base / zone / status / flow 四组令牌 + 图案 / 形状 / 标签 / WCAG 对比度 / `inkOnDark`；`PATTERN_ALPHA` 0.18 与高对比 0.30 + 1px 描边（`highContrast` 开关，默认关） |
+| `src/render/semantic-tokens.ts` | 347 | **唯一 hex 色源**：base / zone / status / flow 四组令牌 + 图案 / 形状 / 标签 / WCAG 对比度 / `inkOnDark`；`PATTERN_ALPHA` 0.18 与高对比 0.30 + 1px 描边（`highContrast` 开关，默认关）；**S-12：新增 `AA_TEXT_THRESHOLD`(4.5) + `textSafe` 逐令牌实算字段（`contrastRatio(color, BASE.canvas) >= 4.5`，非手写常量）+ `base.inkWeak` label 降级为非文字令牌（2.31:1 不满足 SC 1.4.3）**，守卫见 `tests/unit/token-text-safety.test.ts` |
 | `src/render/atlas.ts` | 458 | 12 组虚拟图集清单（2048² 货架布局、含建筑 d1/d2/d3）、`validateAtlasManifest`（9 类校验）、`resolveLoadSet`（分区门控 + LOD + `deferredCould` 标记） |
 | `src/render/asset-naming.ts` | 343 | **A-01 映射层**：内部 `assetKey` ↔ asset-spec §0.3 规范名（`toSheetName`/`fromSheetName`/`assertNamingCoverage`），真实切片接入改数据不改代码 |
 | `src/render/texture-format.ts` | 43 | ASTC → ETC2 → RGB565 → NONE 降级链；UI 图集固定 RGBA8888 |

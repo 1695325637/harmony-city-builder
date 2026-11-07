@@ -55,6 +55,16 @@ export interface SemanticToken {
   ink: string;
   /** 深底用浅墨（状态色 L40–50 上叠字 / 描边用；A-08） */
   inkOnDark: string;
+  /**
+   * 该色**在主底 `base.canvas` 上**是否满足正文对比度（SC 1.4.3 / 官方 2.1.4.1 的 4.5:1）。
+   * 由 `contrastRatio(color, BASE.canvas) >= AA_TEXT_THRESHOLD` 算出，**不是手写常量**。
+   *
+   * `false` 表示**禁止用于承载语义的文本**（S-12 裁定：`base.inkWeak` 2.31:1 即属此类，
+   * 用途限定为装饰线 / 分割线 / 非活动标示；若任何文本节点引用 `textSafe === false`
+   * 的令牌，即视为 `AC-A02-1` 不达标——守卫见 `tests/unit/token-text-safety.test.ts`）。
+   * 注意这是**必要条件**：正文的唯一权威色仍是 `base.ink`。
+   */
+  textSafe: boolean;
 }
 
 export interface SemanticTokenMap {
@@ -207,6 +217,16 @@ export function contrastRatio(hexA: string, hexB: string): number {
 /** 图标 / UI 组件 / 大字的 AA 门槛（art-bible §3.5 = 3:1） */
 export const AA_UI_THRESHOLD = 3;
 
+/**
+ * 正文的 AA 门槛（WCAG SC 1.4.3 = 4.5:1；与华为官方 2.1.4.1「正文 > 4.5:1」数值一致）。
+ *
+ * `textSafe` 的唯一判定依据：`contrastRatio(color, BASE.canvas) >= AA_TEXT_THRESHOLD`。
+ * **这是必要条件而非充分条件**——textSafe=true 只说明「该色在主底上读得清」，
+ * 不代表设计允许把它当正文用：正文的唯一权威色是 `base.ink`（UI 层另有零 hex 纪律）。
+ * `base.inkWeak`（2.31:1）与各底色（自身 vs 自身 ≈ 1:1）会被本门槛正确判为 false。
+ */
+export const AA_TEXT_THRESHOLD = 4.5;
+
 function contrastOf(color: string): ContrastInfo {
   const ratio = contrastRatio(color, BASE.canvas);
   return { ratio, passesAA: ratio >= AA_UI_THRESHOLD };
@@ -222,6 +242,9 @@ function makeToken(
 ): SemanticToken {
   // 浅底（base / zone）叠深墨；深底（status / flow，L≈40–50）叠浅墨（A-08）
   const onDark = group === 'status' || group === 'flow';
+  // textSafe 按主底对比度实算（S-12 裁定）：不凭命名、不凭分组——inkWeak 2.31:1 → false，
+  // 各底色自身对比 ≈1:1 → false。正文唯一权威色是 base.ink（必要条件见 AA_TEXT_THRESHOLD 注）。
+  const ratio = contrastRatio(color, BASE.canvas);
   return {
     id,
     group,
@@ -232,6 +255,7 @@ function makeToken(
     contrast: contrastOf(color),
     ink: onDark ? BASE.canvas : BASE.inkPrimary,
     inkOnDark: BASE.canvas,
+    textSafe: ratio >= AA_TEXT_THRESHOLD,
   };
 }
 
@@ -252,7 +276,7 @@ export function buildSemanticTokenMap(zoneTypes: readonly string[], options: Sem
     'base.panel': makeToken('base.panel', 'base', BASE.panel, 'none', 'none', '面板底'),
     'base.divider': makeToken('base.divider', 'base', BASE.divider, 'none', 'none', '分隔线'),
     'base.ink': makeToken('base.ink', 'base', BASE.inkPrimary, 'none', 'none', '文字·主'),
-    'base.inkWeak': makeToken('base.inkWeak', 'base', BASE.inkWeak, 'none', 'none', '文字·弱'),
+    'base.inkWeak': makeToken('base.inkWeak', 'base', BASE.inkWeak, 'none', 'none', '装饰线 / 非活动标示（非文字令牌，S-12 降级）'),
   };
 
   const zones: Record<string, SemanticToken> = {};
