@@ -28,3 +28,6 @@ export * from './render/flow-legend.ts';
 export * from './render/degradation-plan.ts';
 export * from './render/backend.ts';
 export * from './render/cocos/cocos-backend.ts';
+
+// 组合根（S-12）：把结算编排 / 冷归档 / 存档服务接成一条闭环（引擎无关、注入式介质）
+export * from './composition.ts';

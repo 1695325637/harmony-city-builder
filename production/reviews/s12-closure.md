@@ -45,7 +45,7 @@
 | AC4 5–12 min 完整中循环 | OD-2 A 主动推进 + 即时反馈策略已就位 | 结构支撑 / **实测 BLOCKED** |
 | D-1 R1~R7 / V1~V9 贯通 | 纯逻辑层集成回归全绿 | 结构支撑 / **集成回归待 W5 真机** |
 | D-2 失败—诊断—修正—见效 | S-11 回退内核 + 周期判定已就位 | **与用户裁定同款：留 W5 判定** |
-| D-3 竖屏单手 / 断点续玩 | S-08 弹性布局 + S-10 存档层（内存模拟介质） | 结构支撑 / **真机半侧 BLOCKED（K-4）** |
+| D-3 竖屏单手 / 断点续玩 | S-08 弹性布局 + S-10 存档层（内存模拟介质）+ **S-12 组合根接线**（初始态 tick 0 归档 / P8 落盘 / `onBackground()` 强存 / 回退·解锁后补存，`src/composition.ts`） | 离线侧**已接线并验证**（CR-1~7）；**真机半侧 BLOCKED（K-4）** |
 | D-4 可访问性落地且不降级 | 见 §2；§10.4 保护集已可执行断言 | **PARTIAL**（离线契约 PASS，全项落地未达成） |
 | D-5 真机校准报告 / 数字未冻结 | 手册 + 模板已备，§10.1 表体未动 | **BLOCKED**（冻结动作未发生的纪律已守住） |
 | D-6 H1~H4 零阻塞 | 见 §4 | **PASS（结构复核）** |
@@ -70,12 +70,13 @@
 
 | 证据 | 结果 |
 | --- | --- |
-| 全量测试 | **564 tests / 562 pass / 0 fail / 2 skipped**（skip = AC-A06-1 单手 Playtest、AC-A08-1 上游音频清单） |
+| 全量测试 | **571 tests / 569 pass / 0 fail / 2 skipped**（skip = AC-A06-1 单手 Playtest、AC-A08-1 上游音频清单） |
 | tsc 三入口 | `EXIT=0`（`src/index.ts` / `src/ui/index.ts` / `src/save/index.ts`） |
 | 门禁 | `tests/verification/s12-a11y-gate.test.ts` 29 条 AC 编号化，牙齿自证两处突变（阈值类 / 结构类）能变红 |
 | 降级契约 | `tests/unit/degradation-plan.test.ts` 6 条（含两组牙齿自证） |
 | 令牌守卫 | `tests/unit/token-text-safety.test.ts` 5 条（实算自洽 / 硬禁扫描 / 合成违规必报红） |
-| 行数守卫 | README §2 / §2.1 / §2.3 与磁盘动态比对通过；QAS-19 barrel 出口集合受控（21 条） |
+| 组合根闭环 | `src/composition.ts` + `tests/unit/composition-root.test.ts` 7 条（CR-1~7）：初始态 tick 0 KEYFRAME 可回退、P8 落盘、`onBackground()` 强存、回退补存与幂等不空转、`config.unlockedSide` 零改动、无时钟/平台依赖、`archiveInitial:false` 可判定失败 |
+| 行数守卫 | README §2 / §2.1 / §2.3 与磁盘动态比对通过；QAS-19 barrel 出口集合受控（22 条） |
 
 ## 6. 真机侧 BLOCKED 清单（准出阻塞，不因离线收口解除）
 
@@ -99,7 +100,9 @@
 2. `s12-arch-sweep`：复核并署名三层证据文档；
 3. `s12-design-a11y`：核对 `ux-spec` 代改段（判定链 29/十项、`UX-A20` 行）。
 
-**其它开放项**（不与本批结项冲突，登记留痕）：组合根接线（P8 落盘 / onBackground 强存 / 回退·解锁后存 / 初始态归档 tick 0）、软着陆 GDD 04 §3.3②「抑制新增建设」、解锁形状「边长阶梯 +2」钉定、跨会话全局幂等（H3 开启时由 SaveService epoch 命名空间承担）、`AC-A05-2` 生产侧接线（三条重验门槛）。
+**其它开放项**（不与本批结项冲突，登记留痕）：软着陆 GDD 04 §3.3②「抑制新增建设」、解锁形状「边长阶梯 +2」钉定、跨会话全局幂等（H3 开启时由 SaveService epoch 命名空间承担）、`AC-A05-2` 生产侧接线（三条重验门槛）。
+
+> **组合根接线已销项**：`src/composition.ts` 把初始态归档 tick 0 / P8 落盘 / `onBackground()` 强存 / 回退·解锁后补存全部接好并在内存模拟介质侧验证（CR-1~7）。**接线不等于真机验证**——`onBackground()` 只是注入式方法，应用沙箱 / KV / HAP 权限模型与真实切后台行为仍属 K-4 / EX-03 准出阻塞。
 
 ---
 
