@@ -13,8 +13,14 @@
  * 关键语义（勿省）：TickResult.flowState[k] 的下标 k 是通勤求解的「边槽索引」
  * （traffic.ts 中 qSlot 递增写入的顺序），不是格索引 cellIndex。
  * OverlaySpec.cellIndex 需要格索引，故 buildFlowOverlays 必须显式接受
- * 「边槽 → 格」映射参数，由调用方 / 视图模型提供；本文件严禁把循环下标 k
- * 直接当 cellIndex 用，也严禁凭空捏造映射。映射由谁提供见函数注释与交付回执。
+ * 「边槽 → 格」映射参数；本文件严禁把循环下标 k 直接当 cellIndex 用，
+ * 也严禁凭空捏造映射。
+ *
+ * T-137 补：模拟层已在 TrafficResult / TickResult 导出逐边落点数组 edgeCells
+ * （与 flowState 同长、逐边对齐，未写入边槽为哨兵 -1）。本文件的
+ * flowEdgesFromTick(flowState, edgeCells) 即为「生产侧映射生成器」，把这两个
+ * 数组转成 buildFlowOverlays 的第三参。它**只接受数组参数、不 import 模拟层**：
+ * 哨兵值按数值 -1 识别（与模拟层 NO_EDGE_CELL 同值，靠契约而非依赖对齐）。
  *
  * 本文件不 import 模拟层（保持渲染层单向依赖）：三态枚举以结构化联合类型本地声明，
  * 与模拟层 FlowStateEnum / UI 层 FlowState 结构等价，可直接接收两者的数组。
@@ -95,10 +101,11 @@ export function buildFlowLegend(
  * - edgeIndex：flowState 的下标（qSlot 边槽序号），不是格索引；
  * - cellIndex：等距网格格索引，写入 OverlaySpec.cellIndex。
  *
- * 由谁提供：本批不生产该映射。模拟层 TrafficResult 只导出逐边饱和度 / 三态
- * 数组与聚合量，没有「边槽 ↔ 格坐标」对应表；该关系属通勤图拓扑，应由 S-09 的
- * 视图模型 / 组合根在持有邻接表后构造并显式传入。无可用映射时传空数组即可 ——
- * buildFlowOverlays 产出空叠层，诚实不捏造（见 T-135 回执「剩余项」）。
+ * 由谁提供（T-137 收口）：模拟层 solveTraffic 在写 qSlot 时同步落
+ * `TrafficResult.edgeCells`（该边起点 R 连通块代表格，真实格索引），经 runTick
+ * 透传为 `TickResult.edgeCells`；本文件的 flowEdgesFromTick 把它与 flowState
+ * 配对生成本映射。无可用映射 / 全为哨兵时产出空数组 —— buildFlowOverlays
+ * 随即产出空叠层，诚实不捏造（T-135 回执「剩余项」已关闭）。
  */
 export interface FlowEdgeCell {
   readonly edgeIndex: number;
@@ -139,4 +146,39 @@ export function buildFlowOverlays(
     });
   }
   return overlays;
+}
+
+/**
+ * 生产侧「边槽 → 格」映射生成器（T-137 / S-09 第二批 C 线）。
+ *
+ * 把真实 tick 的两个逐边数组配对成 buildFlowOverlays 的第三参：
+ * `edgeIndex` = 数组下标（边槽序号，qSlot 递增顺序），`cellIndex` = 模拟层落的真实格索引。
+ *
+ * 纯函数、零依赖、**不 import 模拟层**：只接受数组参数，不读饱和度、不做阈值比较、
+ * 不查令牌表。以下边槽一律跳过（诚实不捏造）：
+ * - 未知 / 缺失的三态枚举值；
+ * - 未写入边槽哨兵 -1（与模拟层导出的 NO_EDGE_CELL 同值，按数值识别而非 import）；
+ * - 负数 / 非整数 / NaN / Infinity 的非法格索引；
+ * - 传入 `cellCount` 时超出网格上界的格索引（可选，调用方持有网格尺寸时启用）；
+ * - 两数组长度不齐时超出较短一方的尾部（按 min 截断，不补零）。
+ *
+ * 返回冻结数组与冻结元素；同输入同输出（确定性）。
+ * 局限如实披露：本项目当前无应用装配层，实际生产调用点仍需等 S-12 Cocos 场景接入。
+ */
+export function flowEdgesFromTick(
+  flowState: readonly FlowStateCode[],
+  edgeCells: ArrayLike<number>,
+  cellCount?: number,
+): readonly FlowEdgeCell[] {
+  const n = Math.min(flowState.length, edgeCells.length);
+  const out: FlowEdgeCell[] = [];
+  for (let i = 0; i < n; i++) {
+    const code = flowState[i];
+    if (code !== 'clear' && code !== 'slow' && code !== 'congested') continue;
+    const cell = edgeCells[i];
+    if (!Number.isInteger(cell) || cell < 0) continue;
+    if (cellCount !== undefined && cell >= cellCount) continue;
+    out.push(Object.freeze({ edgeIndex: i, cellIndex: cell }));
+  }
+  return Object.freeze(out);
 }

@@ -16,6 +16,12 @@ import { zoneIndex } from '../core/schema.ts';
 
 export type FlowStateEnum = 'clear' | 'slow' | 'congested';
 
+/**
+ * 边槽无落点哨兵（T-137 / S-09 第二批 C 线）：-1 表示「该边槽未写入 / 无可绘制格」。
+ * 与「格 0」严格区分：0 是合法格索引，绝不拿 0 冒充。
+ */
+export const NO_EDGE_CELL = -1;
+
 export interface TrafficResult {
   T_c: number;
   t_g: Float64Array;
@@ -23,6 +29,14 @@ export interface TrafficResult {
   qOverCap: Float64Array;
   /** 流线三态枚举（GDD 03 §3.5）：与 `qOverCap` 同长、逐边对齐，纯视觉派生量 */
   flowState: FlowStateEnum[];
+  /**
+   * 逐边落点格索引（T-137）：与 `qOverCap` / `flowState` 同长、逐边对齐。
+   * 值语义：`>= 0` = 通勤图块拓扑里的真实格索引（该边起点 R 连通块的代表格 `blockRep[rb]`，
+   * 即 flood fill 的最小格索引）；`NO_EDGE_CELL`(-1) = 该边槽未写入、无落点。
+   * **纯视觉派生量**：只供渲染层出叠层，绝不进入 `T_c / f_c / f_s / S` 计分链（AC-T8 ④）。
+   * 严禁填 `qSlot` / 循环下标当 cellIndex。
+   */
+  edgeCells: Int32Array;
   unreachable: boolean;
   blocks: number;
   /** 环境负荷 E（LU），由通勤图距离聚合，供 01 的 f_e */
@@ -72,6 +86,8 @@ export interface TrafficWorkspace {
   t_g: Float64Array;
   d: Float64Array;
   qOverCap: Float64Array;
+  /** 逐边落点格索引 scratch（T-137）：预分配、每次 solve 复用并重置，零热路径分配。 */
+  edgeCells: Int32Array;
   result: TrafficResult;
 }
 
@@ -81,6 +97,8 @@ export function createTrafficWorkspace(side: number, config: Config): TrafficWor
   const t_g = new Float64Array(cellCount);
   const d = new Float64Array(capacity * capacity);
   const qOverCap = new Float64Array(capacity);
+  const edgeCells = new Int32Array(capacity);
+  edgeCells.fill(NO_EDGE_CELL);
   const ws: TrafficWorkspace = {
     side,
     cellCount,
@@ -100,12 +118,14 @@ export function createTrafficWorkspace(side: number, config: Config): TrafficWor
     t_g,
     d,
     qOverCap,
+    edgeCells,
     result: {
       T_c: 0,
       t_g,
       d,
       qOverCap,
       flowState: [],
+      edgeCells,
       unreachable: false,
       blocks: 0,
       E: 0,
@@ -209,6 +229,9 @@ export function solveTraffic(state: CityState, config: Config, ws: TrafficWorksp
   ws.t_g.fill(config.T_s_max);
   ws.d.fill(0);
   ws.qOverCap.fill(0);
+  // 逐边落点每次 solve 重置为哨兵：workspace 复用时不得残留上一 tick 的格坐标。
+  // 纯视觉派生量，重置不影响 T_c / f_c / f_s / S 计分链（AC-T8 ④）。
+  ws.edgeCells.fill(NO_EDGE_CELL);
   ws.blockId.fill(-1);
 
   // ---- ① 同类型 4-邻接连通块合并（B ≤ maxBlocks，不做逐格 OD 矩阵） ----
@@ -313,7 +336,14 @@ export function solveTraffic(state: CityState, config: Config, ws: TrafficWorksp
       const t = pathTimeBetween(rb, ib, cells, ws, config, edgeTime, r);
       weighted += q * t;
       demand += q;
-      if (qSlot < ws.qOverCap.length) ws.qOverCap[qSlot++] = qoc;
+      if (qSlot < ws.qOverCap.length) {
+        ws.qOverCap[qSlot] = qoc;
+        // 该边槽的落点 = 本条 R→I 边的起点 R 连通块代表格（flood fill 的最小格索引，
+        // 真实格坐标，来自通勤图块拓扑）；绝不拿 qSlot / 循环下标冒充 cellIndex。
+        // 纯视觉派生量：只写落点，不参与 weighted / demand / E / T_c 的任何累加。
+        ws.edgeCells[qSlot] = ws.blockRep[rb];
+        qSlot++;
+      }
       if (dSlot < ws.d.length) ws.d[dSlot++] = t;
       r.E += safeDiv(ws.blockJ[ib] * ws.blockP[rb], 1 + t, 0, config.epsilon);
     }

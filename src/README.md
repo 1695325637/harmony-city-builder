@@ -28,9 +28,9 @@
 | `src/core/schema.ts` | 306 | 网格 / 分区 / 预算 / 双帧 schema，`schemaVersion`，`>32×32` 显式拒绝，序列化回环；**T-116：`deserializeState` 实参化 + 强制 `assertConfigCompatible`（D-01 修复点 1）** |
 | `src/core/config.ts` | 242 | `Config` / `PLACEHOLDER_DEFAULTS` / `createDefaultConfig` / `computeConfigHash` / 可注入聚合器 / 版本兼容断言 / **T-133 三态阈值键 `flowClearMaxQOverCap` `flowSlowMaxQOverCap`（占位，AC-T8 ④ 不进计分链）+ `assertTrafficThresholds`** |
 | `src/simulation/commands.ts` | 90 | `makeCommand`、`CommandQueue`（幂等键）、`InputGate` |
-| `src/simulation/traffic.ts` | 335 | 最小可注入通勤求解：连通块合并（B ≤ 64）+ ROAD 图 BFS + 拥堵单调 + 不可达 / 除零兜底；**T-133 `FlowStateEnum` / `classifyFlowState`（§4 钳制后逐边 q/cap 分档，纯函数）+ `TrafficResult.flowState`（与 qOverCap 同长、逐边对齐）** |
+| `src/simulation/traffic.ts` | 365 | 最小可注入通勤求解：连通块合并（B ≤ 64）+ ROAD 图 BFS + 拥堵单调 + 不可达 / 除零兜底；**T-133 `FlowStateEnum` / `classifyFlowState`（§4 钳制后逐边 q/cap 分档，纯函数）+ `TrafficResult.flowState`（与 qOverCap 同长、逐边对齐）**；**T-137 `NO_EDGE_CELL`(-1) + `TrafficResult.edgeCells`（逐边真实落点格 = R 连通块代表格，与 flowState / qOverCap 同长；未写入边槽为哨兵；纯视觉派生量，不进 AC-T8 ④ 计分链）** |
 | `src/simulation/snapshot.ts` | 258 | **T-116 最小内存实现**：`buildTickSnapshot` + `createInMemorySnapshotStore`（Keyframe/Delta 规则、冷归档恢复走 `deserializeState`、D-01 联动；介质为内存模拟，持久化留 S-05/S-09）；**T-133 `TickSnapshot.flowState` 标 `pending:S-05`（纯视觉派生，渲染层下发图例即可，不进冷归档）** |
-| `src/simulation/tick-pipeline.ts` | 446 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）** |
+| `src/simulation/tick-pipeline.ts` | 454 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）**；**T-137 `TickResult.edgeCells` 透传 `TrafficResult.edgeCells`（逐边落点，纯视觉派生）** |
 | `src/simulation/session.ts` | 100 | 编排层 `createSimulation`：仅 `advanceDay`（V6）触发结算，连点幂等，结算中 gate 锁定；**T-116：入口 `assertConfigCompatible`（D-01 修复点 2）** |
 | `src/index.ts` | 27 | 统一导出（T-135 增 `render/flow-legend.ts` 出口） |
 | `tests/unit/*.test.ts` | 869 | 8 个测试文件 / 51 条断言用例（7 文件 45 条基线 + `d01-config-compat.test.ts` 6 条 D-01 回归，见 §4） |
@@ -52,7 +52,7 @@
 | `src/render/asset-naming.ts` | 343 | **A-01 映射层**：内部 `assetKey` ↔ asset-spec §0.3 规范名（`toSheetName`/`fromSheetName`/`assertNamingCoverage`），真实切片接入改数据不改代码 |
 | `src/render/texture-format.ts` | 43 | ASTC → ETC2 → RGB565 → NONE 降级链；UI 图集固定 RGBA8888 |
 | `src/render/draw-list.ts` | 334 | 深度排序 + 按图集聚批 + DrawCall **估算** + `densityToSuffix`（0→无 / 1→d1 / 2→d2 / 3→d3） |
-| `src/render/flow-legend.ts` | 142 | **T-135**：枚举→`flow.*` 令牌 id 映射唯一落点 + `buildFlowLegend`（真实令牌填充不透明色块）+ `buildFlowOverlays`（`flowState[]` + 显式「边槽→格」映射 → `OverlaySpec[]`）；零色值 / 零阈值键 / 不 import simulation |
+| `src/render/flow-legend.ts` | 184 | **T-135**：枚举→`flow.*` 令牌 id 映射唯一落点 + `buildFlowLegend`（真实令牌填充不透明色块）+ `buildFlowOverlays`（`flowState[]` + 显式「边槽→格」映射 → `OverlaySpec[]`）；**T-137**：`flowEdgesFromTick(flowState, edgeCells, cellCount?)` 生产侧映射生成器（过滤哨兵 / 非法 / 越界 / 未知枚举，零色值 / 零阈值键 / 不 import simulation，哨兵按数值 -1 识别） |
 | `src/render/backend.ts` | 33 | `RenderBackend` 契约（createNode / setFrame / setPosition / setScale / setDepth / destroy / batchBegin / batchEnd） |
 | `src/render/cocos/cocos-backend.ts` | 158 | 注入式 Cocos 适配（**不 import 'cc'**）；兄弟序 = `depthKey`；9-slice 预留；`verifiedInEngine=false` |
 

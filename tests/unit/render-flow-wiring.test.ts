@@ -11,6 +11,11 @@
  * ⑥ AD-004 双通道：即时通道 A 不读三态数据；渲染层不 import simulation、不持有阈值键；
  * ⑦ 确定性 / 不修改输入 / 冻结。
  *
+ * T-137 扩展（S-09 第二批 C 线）：
+ * ⑧ flowEdgesFromTick 生产侧映射生成器：哨兵 / 非法 / 越界 / 未知枚举过滤；
+ * ⑨ 真实 runTick 的 flowState + edgeCells 端到端全链（T-135 遗留「映射未提供」关门项）；
+ * ⑩ 三态真实 runTick 的 tokenId / deriveLine 线宽亮度。
+ *
  * 零依赖：Node 22 --experimental-strip-types + node:test。
  */
 
@@ -33,6 +38,8 @@ import {
   buildViewModel,
   buildDrawList,
   VIRTUAL_ATLAS_MANIFEST,
+  NO_EDGE_CELL,
+  flowEdgesFromTick,
   type Config,
   type CityState,
 } from '../../src/index.ts';
@@ -365,4 +372,96 @@ test('RF-11 渲染层新模块经 src/index.ts 统一导出，README §2.1 有�
   assert.ok(/export \* from '\.\/render\/flow-legend\.ts'/.test(bar), '新模块须经统一 barrel 导出');
   const readme = readFileSync(join(process.cwd(), 'src/README.md'), 'utf8');
   assert.ok(/src\/render\/flow-legend\.ts/.test(readme), 'README §2.1 须有索引行');
+});
+
+// ---------------------------------------------------------------------------
+// ⑦ T-137：生产侧映射生成器 + 真实 runTick 端到端全链
+// ---------------------------------------------------------------------------
+
+test('RF-12 flowEdgesFromTick：哨兵 / 非法 / 越界 / 未知枚举过滤，且渲染层不 import simulation', () => {
+  const flowState: readonly FlowStateCode[] = ['slow', 'congested', 'clear', 'clear', 'clear'];
+  const cells = Int32Array.from([12, NO_EDGE_CELL, 0, 9999, -3]);
+  const edges = flowEdgesFromTick(flowState, cells, 256);
+  assert.deepEqual(edges.map((e) => e.edgeIndex), [0, 2], '仅保留带真实落点的边槽');
+  assert.deepEqual(edges.map((e) => e.cellIndex), [12, 0], '格 0 合法、越界 9999 / 负数 / 哨兵全跳过');
+  assert.equal(Object.isFrozen(edges), true);
+
+  // 静态契约：适配器在渲染层文件内、只接受数组参数、不 import 模拟层
+  const src = readFileSync(join(process.cwd(), 'src/render/flow-legend.ts'), 'utf8');
+  assert.match(stripComments(src), /export function flowEdgesFromTick\(/);
+  assert.equal(/from\s+['"][^'"]*\/simulation\//.test(stripComments(src)), false,
+    '适配器不得 import simulation（RF-2 单向依赖）');
+  assert.equal(/flowClearMaxQOverCap|flowSlowMaxQOverCap/.test(stripComments(src)), false,
+    '适配器不得持有阈值键');
+  // 哨兵按数值识别，不依赖模拟层导出符号
+  assert.equal(/NO_EDGE_CELL/.test(stripComments(src)), false, '渲染层不得引用模拟层哨兵符号');
+});
+
+test('RF-13 真实 runTick 端到端全链：flowState + edgeCells → flowEdgesFromTick → buildDrawList', () => {
+  const config = createDefaultConfig();
+  const tokens = buildSemanticTokenMap(config.zoneTypes);
+  const state = buildCity(config);
+  const ws = createTickWorkspace(config, 16);
+  const tick = runTick(state, [makeCommand.advance('rf-13', 1)], config, ws);
+
+  assert.ok(tick.edgeCells instanceof Int32Array, 'TickResult 须透传 edgeCells');
+  assert.equal(tick.edgeCells.length, tick.flowState.length, '与 flowState 同长');
+  assert.ok(Array.from(tick.edgeCells).some((c) => c >= 0), '至少有真实落点');
+  assert.ok(Array.from(tick.edgeCells).some((c) => c === NO_EDGE_CELL), '至少有哨兵边槽');
+
+  // 生产侧映射生成器（本批改由模拟层 edgeCells 提供，T-135 的「映射未提供」已关闭）
+  const edgeToCell = flowEdgesFromTick(tick.flowState, tick.edgeCells, 16 * 16);
+  assert.ok(edgeToCell.length > 0, '真实落点生成非空映射');
+  assert.ok(edgeToCell.length < tick.edgeCells.length, '哨兵边槽被过滤，未全量灌入');
+  for (const b of edgeToCell) {
+    assert.equal(b.cellIndex, tick.edgeCells[b.edgeIndex], 'cellIndex 逐项取自 edgeCells');
+    assert.ok(b.cellIndex >= 0 && b.cellIndex < 256, '落点须为合法格索引');
+  }
+
+  const overlays = buildFlowOverlays(tick.flowState, tokens, edgeToCell);
+  assert.equal(overlays.length, edgeToCell.length);
+  const vm = buildViewModel(tick.state);
+  const dl = buildDrawList(vm, VIRTUAL_ATLAS_MANIFEST, 'L0', { overlays });
+  const flows = dl.overlays.filter((o) => o.layer === 'flow');
+  assert.equal(flows.length, overlays.length, '全部叠层进入绘制列表');
+
+  // OverlayDraw.cellIndex 与 edgeCells 逐项一致（排序后比对，不是拿 i 凑数）
+  assert.deepEqual(
+    flows.map((o) => o.cellIndex).sort((a, b) => a - b),
+    edgeToCell.map((b) => b.cellIndex).sort((a, b) => a - b),
+    'OverlayDraw.cellIndex 必须逐项来自模拟层真实落点',
+  );
+  assert.equal(dl.lineEncodedCount, overlays.length, 'L0 通勤态全部走线编码');
+  assert.equal(dl.shapeSpriteCount, 0, 'L0 不产形状');
+
+  // 每个叠层的 tokenId / 线宽由该边真实 flowState 决定
+  for (let i = 0; i < flows.length; i++) {
+    const o = flows[i];
+    assert.ok(o.tokenId in EXPECTED_LINE, 'tokenId 必须是 flow.* 三态之一');
+    assert.deepEqual(o.line, EXPECTED_LINE[o.tokenId], 'deriveLine 线宽/亮度');
+    assert.equal(o.group, 'flow');
+  }
+});
+
+test('RF-14 三态真实 runTick：改 cap 分别得到 clear / slow / congested 的正确 tokenId 与线宽', () => {
+  // buildCity: 5 格 R(密度3) → qTotal=6, cap=10→qoc=0.6(slow)；cap=20→0.3(clear)；cap=5→1.2(congested)
+  for (const [cap, want] of [[20, 'clear'], [10, 'slow'], [5, 'congested']] as const) {
+    const config = createDefaultConfig({ cap });
+    const tokens = buildSemanticTokenMap(config.zoneTypes);
+    const state = buildCity(config);
+    const tick = runTick(state, [makeCommand.advance('rf-14-' + cap, 1)], config, createTickWorkspace(config, 16));
+    assert.equal(tick.flowState[0], want, `cap=${cap} 首边应为 ${want}`);
+
+    const edgeToCell = flowEdgesFromTick(tick.flowState, tick.edgeCells, 16 * 16);
+    const overlays = buildFlowOverlays(tick.flowState, tokens, edgeToCell);
+    const dl = buildDrawList(buildViewModel(tick.state), VIRTUAL_ATLAS_MANIFEST, 'L0', { overlays });
+    const flows = dl.overlays.filter((o) => o.layer === 'flow');
+    assert.equal(flows.length, edgeToCell.length);
+    for (const o of flows) {
+      assert.equal(o.tokenId, FLOW_TOKEN_ID[want], `cap=${cap} tokenId`);
+      assert.deepEqual(o.line, EXPECTED_LINE[FLOW_TOKEN_ID[want]], `cap=${cap} deriveLine`);
+    }
+    // 图例链仍由渲染层真实图例驱动，UI 只取枚举与 label
+    assert.deepEqual(legendLabels(), ['畅', '缓', '堵']);
+  }
 });

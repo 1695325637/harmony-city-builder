@@ -150,8 +150,13 @@ test('DX-9 四段卡片 / 三层披露 / 教学卡 / 耦合披露的关键符号
     'TutorialCard', 'CouplingDisclosure', 'queryDiagnosis', 'queryCycleRange',
     'MAX_DETAIL_CARDS', 'MAX_FACTOR_ROWS', 'COUPLING_THRESHOLD', 'ACTION_VERB_BY_CAUSE',
     'TUTORIAL_TEXT', 'COUPLING_BASIS',
+    // —— 第二批 D 线新增：L2 面板 / 两级反馈 / D-16 文案分支 ——
+    'DiagnosisPanelController', 'DiagnosisPanelSlot', 'DiagnosisPanelView',
+    'DiagnosisEmptyReason', 'TUTORIAL_TEXT_E1', 'TUTORIAL_TEXT_MISSING_SOURCE',
+    'TUTORIAL_TEXT_NO_SNAPSHOT', 'projectTwoLevelFeedback', 'TwoLevelSeparationVerdict',
+    'TWO_LEVEL_LATENCY_NOTE', 'DIAGNOSIS_REFRESH_TYPES',
   ]) {
     assert.ok(code.includes(sym), '缺关键符号：' + sym);
   }
-  assert.equal(files().length, 3, 'diagnosis 子模块恰 3 文件（types / query / index）');
+  assert.equal(files().length, 4, 'diagnosis 子模块恰 4 文件（types / query / panel / index）');
 });

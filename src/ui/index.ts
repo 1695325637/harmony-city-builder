@@ -21,6 +21,10 @@ export * from './interaction-controller.ts';
 export * from './motion-policy.ts';
 export * from './feedback-timing.ts';
 export * from './hud/index.ts';
+// T-138 S-09 第二批 D 线：L2 诊断面板 + 两级反馈可观测（自查自出口 barrel）。
+// 挂载前已逐一核对导出名：diagnosis/** 与 feedback-bus / hud / motion-policy /
+// interaction-controller 等既有模块无重名，不存在 export * 歧义名静默消失。
+export * from './diagnosis/index.ts';
 
 // ---------------------------------------------------------------------------
 // 层间契约的唯一落点（D-14）——**实现文件不得 import `Simulation`**

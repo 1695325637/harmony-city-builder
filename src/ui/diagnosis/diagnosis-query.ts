@@ -41,6 +41,7 @@ import type {
   DiagnosisAttributionEntry,
   DiagnosisDeltaEntry,
   DiagnosisDetailView,
+  DiagnosisEmptyReason,
   DiagnosisFactorView,
   DiagnosisLayer,
   DiagnosisSnapshotSource,
@@ -66,10 +67,48 @@ export const COUPLING_BASIS =
   'ΔS_penalty、attributionThreshold 过滤与 clamp 钳制，不等于 ΔS_abs − ΔS；披露判定为近似，' +
   '不声称二者恒等。本层同时无条件给出 S 绝对变化数值（GDD 01 §4.3 允许的另一种披露方式）。';
 
-/** 首 tick 教学卡文案（GDD 01 §6.1 E1 / GDD 05 E1；不是「系统波动」类兜底提示） */
-export const TUTORIAL_TEXT =
+/**
+ * D-16：三种「无归因卡」情形各自准确的文案，不得混用。
+ * 第一批把 tutorialOnly 一律写成「首 tick 教学」，但非首 tick 的来源缺失也会走该分支
+ * （quality-lead T-136 登记 S4）。此处按事实分类给三份措辞，均不是兜底提示。
+ */
+export const TUTORIAL_TEXT_E1 =
   '空城基线已建立：本 tick 为教学占位，不生成归因型议题。' +
   '满意度若变化请以 HUD 数值为准；下一 tick 起可查看具体原因。';
+
+export const TUTORIAL_TEXT_MISSING_SOURCE =
+  '本 tick 未记录到可追溯的归因来源，未生成归因型诊断；' +
+  'S 绝对变化请以 HUD 数值为准（GDD 01 §4.3 无条件披露）。';
+
+export const TUTORIAL_TEXT_NO_SNAPSHOT = '该 tick 无快照记录，未生成归因型诊断。';
+
+/** 首 tick 教学卡文案的兼容别名（第一批导出名保持不变，避免下游断链） */
+export const TUTORIAL_TEXT = TUTORIAL_TEXT_E1;
+
+/** D-16：按只读快照事实分类，不推断、不编造 */
+function classifyEmptyReason(
+  snap: DiagnosisTickSnapshot,
+  unsourcedSuppressed: number,
+): Exclude<DiagnosisEmptyReason, 'NO_SNAPSHOT'> {
+  // 与 tick-pipeline.ts 的 `isFirstTick = s.tickId === 0` 同口径；
+  // 教学占位条目在任意 cur.dS===0 的 tick 都会产生，故不能单凭「有教学条目」判定首 tick。
+  const isColdStartFirstTick = snap.tickId === 0 && snap.cycleId === 0 && snap.cycleTickIndex === 0;
+  // 首 tick 且无来源缺失 → E1 教学（GDD 05 E1 允许归因链为空 / 教学占位条目为 0）。
+  // 非首 tick，或首 tick 却丢过来源 → 一律如实标为数据缺失。
+  return isColdStartFirstTick && unsourcedSuppressed === 0 ? 'E1_FIRST_TICK' : 'MISSING_SOURCE';
+}
+
+function tutorialTextFor(reason: DiagnosisEmptyReason): string {
+  if (reason === 'E1_FIRST_TICK') return TUTORIAL_TEXT_E1;
+  if (reason === 'NO_SNAPSHOT') return TUTORIAL_TEXT_NO_SNAPSHOT;
+  return TUTORIAL_TEXT_MISSING_SOURCE;
+}
+
+function emptyHeadlineFor(reason: Exclude<DiagnosisEmptyReason, 'NO_SNAPSHOT'>): string {
+  return reason === 'E1_FIRST_TICK'
+    ? '首 tick 教学：空城基线，暂无归因型诊断（' + TUTORIAL_LABEL + '卡）'
+    : '数据缺失：本 tick 无可追溯来源，未生成归因型诊断（' + TUTORIAL_LABEL + '卡）';
+}
 
 // ---------------------------------------------------------------------------
 // 纯读辅助（无副作用、无时钟、无随机）
@@ -132,14 +171,19 @@ function makeCard(a: DiagnosisAttributionEntry, onNonFinite: () => void): FourSe
   });
 }
 
-function makeTutorialCard(candidates: readonly DiagnosisAttributionEntry[]): TutorialCard {
+function makeTutorialCard(
+  candidates: readonly DiagnosisAttributionEntry[],
+  reason: DiagnosisEmptyReason,
+): TutorialCard {
   const first = candidates.length > 0 ? candidates[0] : null;
   return Object.freeze({
     kind: 'TUTORIAL' as const,
     label: TUTORIAL_LABEL,
     explicitlyMarked: true as const,
+    // D-16：文案按事实分类，不自称首 tick 除非真是首 tick
+    reason,
     causeRefEmpty: first === null ? true : !hasSource(first),
-    text: TUTORIAL_TEXT,
+    text: tutorialTextFor(reason),
     suggestedVerb: first === null ? '' : first.suggested_verb,
     noAttributionDiagnosis: true as const,
   });
@@ -181,6 +225,7 @@ interface Projection {
   readonly l2: DiagnosisDetailView;
   readonly tutorial: TutorialCard | null;
   readonly tutorialOnly: boolean;
+  readonly emptyReason: DiagnosisEmptyReason | null;
   readonly traceable: boolean;
   readonly unsourcedSuppressed: number;
   readonly nonFiniteSuppressed: number;
@@ -225,7 +270,13 @@ function projectSnapshot(snap: DiagnosisTickSnapshot): Projection {
   const cards = Object.freeze(allCards.slice(0, MAX_DETAIL_CARDS));
   const overflowCount = allCards.length - cards.length;
   const tutorialOnly = cards.length === 0;
-  const tutorial = tutorialOnly ? makeTutorialCard(tutorialCandidates) : null;
+  // D-16：只在真的无归因卡时分类；按 tickId / cycleTickIndex / 来源如实判定
+  const emptyReason: DiagnosisEmptyReason | null = tutorialOnly
+    ? classifyEmptyReason(snap, unsourcedSuppressed)
+    : null;
+  const tutorial = tutorialOnly && emptyReason !== null
+    ? makeTutorialCard(tutorialCandidates, emptyReason)
+    : null;
   const coupling = makeCoupling(sAbsoluteChange, sBefore, sAfter, attributionSum);
 
   // AC2 可追溯性：≥1 具体原因，或本 tick 无显著变化，或 E1 首 tick 教学例外。
@@ -238,8 +289,11 @@ function projectSnapshot(snap: DiagnosisTickSnapshot): Projection {
   const dirText = direction === 'UP' ? '上升 ' + fmt(sAbsoluteChange) + ' 分'
     : direction === 'DOWN' ? '下降 ' + fmt(Math.abs(sAbsoluteChange)) + ' 分'
       : '持平';
-  const headline = tutorialOnly
-    ? '首 tick 教学：空城基线，暂无归因型诊断（' + TUTORIAL_LABEL + '卡）'
+  // D-16：两种文案各自准确；非首 tick 的来源缺失不再自称「首 tick 教学」。
+  // projectSnapshot 内的 classifyEmptyReason 只返回 E1_FIRST_TICK / MISSING_SOURCE，
+  // NO_SNAPSHOT 由 emptyViewModel 单独处理，故此处无需再判。
+  const headline = emptyReason !== null
+    ? emptyHeadlineFor(emptyReason)
     : '满意度较上一 tick ' + dirText + '，主因 ' + cards[0].factorLabel;
 
   const l0: DiagnosisSummary = Object.freeze({
@@ -248,6 +302,7 @@ function projectSnapshot(snap: DiagnosisTickSnapshot): Projection {
     direction,
     cardCount: cards.length,
     tutorialOnly,
+    emptyReason,
   });
 
   // L1：按因子聚合（≤4 行），按 |贡献量| 降序，主因优先。
@@ -282,6 +337,7 @@ function projectSnapshot(snap: DiagnosisTickSnapshot): Projection {
     l2,
     tutorial,
     tutorialOnly,
+    emptyReason,
     traceable,
     unsourcedSuppressed,
     nonFiniteSuppressed,
@@ -340,6 +396,9 @@ export function queryDiagnosis(source: DiagnosisSnapshotSource, tickId: number):
     get tutorialOnly(): boolean {
       return p.tutorialOnly;
     },
+    get emptyReason(): DiagnosisEmptyReason | null {
+      return p.emptyReason;
+    },
     get traceable(): boolean {
       return p.traceable;
     },
@@ -358,13 +417,15 @@ export function queryDiagnosis(source: DiagnosisSnapshotSource, tickId: number):
 
 function emptyViewModel(tickId: number): DiagnosisViewModel {
   const coupling = makeCoupling(0, 0, 0, 0);
-  const tutorial = makeTutorialCard([]);
+  const emptyReason: DiagnosisEmptyReason = 'NO_SNAPSHOT';
+  const tutorial = makeTutorialCard([], emptyReason);
   const l0: DiagnosisSummary = Object.freeze({
     headline: '该 tick 无快照记录',
     sAbsoluteChange: 0,
     direction: 'FLAT',
     cardCount: 0,
     tutorialOnly: true,
+    emptyReason,
   });
   const l1: DiagnosisFactorView = Object.freeze({ rows: Object.freeze([]) });
   const l2: DiagnosisDetailView = Object.freeze({
@@ -384,6 +445,7 @@ function emptyViewModel(tickId: number): DiagnosisViewModel {
     l2,
     tutorial,
     tutorialOnly: true,
+    emptyReason,
     traceable: false,
     unsourcedSuppressed: 0,
     nonFiniteSuppressed: 0,

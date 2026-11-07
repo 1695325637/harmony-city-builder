@@ -57,6 +57,12 @@ export interface TickResult {
   p4Satisfaction: number;
   /** 流线三态枚举（GDD 03 §3.5）：与 TrafficResult.flowState 同义，供 UI / 渲染消费 */
   flowState: ('clear' | 'slow' | 'congested')[];
+  /**
+   * 逐边落点格索引（T-137）：与 `flowState` 同长、逐边对齐；
+   * `>= 0` 为通勤图块拓扑的真实格索引，`NO_EDGE_CELL`(-1) 表示该边槽未写入。
+   * **纯视觉派生量**：供渲染层生成「边槽→格」映射，绝不进入计分链（AC-T8 ④）。
+   */
+  edgeCells: Int32Array;
   ruleStages: Record<string, StageId>;
 }
 
@@ -116,6 +122,7 @@ export function createTickWorkspace(config: Config, side: number): TickWorkspace
     cycleOutcome: 'IN_CYCLE',
     p4Satisfaction: 0,
     flowState: [],
+    edgeCells: new Int32Array(0),
     ruleStages: RULE_TO_STAGE,
   };
   return {
@@ -410,6 +417,7 @@ export function runTick(
   out.cycleOutcome = outcome;
   out.p4Satisfaction = p4S;
   out.flowState = traffic.flowState;
+  out.edgeCells = traffic.edgeCells;
   return out;
 }
 

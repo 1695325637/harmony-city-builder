@@ -20,6 +20,9 @@ import {
   MAX_DETAIL_CARDS,
   MAX_FACTOR_ROWS,
   TUTORIAL_LABEL,
+  TUTORIAL_TEXT_E1,
+  TUTORIAL_TEXT_MISSING_SOURCE,
+  TUTORIAL_TEXT_NO_SNAPSHOT,
   queryDiagnosis,
   queryCycleRange,
   type DiagnosisAttributionEntry,
@@ -258,25 +261,39 @@ test('DQ-8 AC-I1：refId 为空的非教学归因被抑制，不产出任何兜�
   for (const hint of GENERIC_HINTS) assert.equal(strings.includes(hint), false, '不得出现兜底文案：' + hint);
 });
 
-test('DQ-9 AC-I1：全部无来源且变化显著 → 教学卡（明确标注），traceable=false，绝不编造归因', () => {
+test('DQ-9 AC-I1/D-16：非首 tick（tickId=11）全部无来源 → MISSING_SOURCE，traceable=false，绝不编造归因', () => {
   const attributions = [attr({ refId: '', dS_i: -5 })];
   const vm = queryDiagnosis(makeSource([mkSnap({ tickId: 11, sOld: 60, sNew: 55, attribution: attributions })]), 11);
   assert.equal(vm.l2.cards.length, 0);
   assert.notEqual(vm.tutorial, null);
   assert.equal(vm.tutorial!.explicitlyMarked, true);
   assert.equal(vm.tutorial!.label, TUTORIAL_LABEL);
-  assert.equal(vm.traceable, false, '有数据缺口时如实标记不可追溯');
+  assert.equal(vm.traceable, false, '有数据缺口时如实标记不可追溯（D-16 不动数据诚实性）');
+  assert.equal(vm.unsourcedSuppressed, 1, '来源缺失计数如实');
+  // D-16 核心：非首 tick 不得自称「首 tick 教学」
+  assert.equal(vm.emptyReason, 'MISSING_SOURCE');
+  assert.equal(vm.tutorial!.reason, 'MISSING_SOURCE');
+  assert.equal(vm.l0.emptyReason, 'MISSING_SOURCE');
+  assert.equal(vm.l0.headline.includes('首 tick'), false, '文案标签不得与事实不符');
+  assert.ok(vm.l0.headline.includes('数据缺失'));
+  assert.equal(vm.tutorial!.text, TUTORIAL_TEXT_MISSING_SOURCE);
+  // 数据诚实性全部保持
+  assert.equal(vm.l2.coupling.deltaSDecompositionCarried, false);
+  assert.ok(vm.l2.coupling.message.includes('-5'), '仍无条件给出 S 绝对变化数值');
   const strings = allStrings(vm).join('|');
   for (const hint of GENERIC_HINTS) assert.equal(strings.includes(hint), false);
 });
 
-test('DQ-10 快照缺失 → found=false，不编造归因 / 不崩溃', () => {
+test('DQ-10 快照缺失 → found=false / NO_SNAPSHOT，不编造归因 / 不崩溃', () => {
   const vm = queryDiagnosis(makeSource([]), 999);
   assert.equal(vm.found, false);
   assert.equal(vm.l2.cards.length, 0);
   assert.equal(vm.traceable, false);
   assert.equal(vm.l0.headline, '该 tick 无快照记录');
   assert.notEqual(vm.tutorial, null);
+  assert.equal(vm.emptyReason, 'NO_SNAPSHOT', 'D-16：第三种事实分类');
+  assert.equal(vm.tutorial!.reason, 'NO_SNAPSHOT');
+  assert.equal(vm.tutorial!.text, TUTORIAL_TEXT_NO_SNAPSHOT);
   vm.setLayer('L2');
   assert.equal(vm.activeLayer, 'L0', '空 VM 无面板可展开');
 });
@@ -336,11 +353,12 @@ test('DQ-12 AC-I3：四类 causeType 均映射到 V3/V4/V5 且可达；未知类
 
 const COLD_START = [{ ...attr({ causeType: '教学', refId: 'tutorial:baseline', dS_i: 0, contribution: 0, detail: 'cold-start baseline', suggested_verb: 'V1' }) }];
 
-test('DQ-13 T-113②：首 tick ΔS_abs ≠ 0 仍不触发 V2 归因型诊断，只给一条教学占位归因', () => {
+test('DQ-13 T-113②/D-16：真首 tick（tickId=0）ΔS_abs ≠ 0 仍不触发 V2 归因型诊断，只给 E1 教学占位归因', () => {
   // E1：ΔS=0 / dSByFactor 全 0；S_t 照算，ΔS_abs = S_t − S_{−1} ≠ 0 允许。
+  // D-16：夹具必须是真首 tick（与 tick-pipeline.ts 的 isFirstTick = s.tickId === 0 同口径）。
   const vm = queryDiagnosis(
-    makeSource([mkSnap({ tickId: 30, sOld: 50, sNew: 52, attribution: COLD_START })]),
-    30,
+    makeSource([mkSnap({ tickId: 0, cycleId: 0, cycleTickIndex: 0, sOld: 50, sNew: 52, attribution: COLD_START })]),
+    0,
   );
   assert.equal(vm.tutorialOnly, true);
   assert.equal(vm.l2.cards.length, 0, '不生成归因型诊断卡片');
@@ -352,23 +370,35 @@ test('DQ-13 T-113②：首 tick ΔS_abs ≠ 0 仍不触发 V2 归因型诊断，
   assert.equal(vm.l2.coupling.sAbsoluteChange, 2, 'ΔS_abs ≠ 0 被如实记录');
   assert.equal(vm.traceable, true, 'E1 例外：教学占位即视为已处理');
   assert.ok(vm.l0.headline.includes(TUTORIAL_LABEL));
+  assert.equal(vm.emptyReason, 'E1_FIRST_TICK', 'D-16：真首 tick 才标 E1');
+  assert.equal(vm.tutorial!.reason, 'E1_FIRST_TICK');
+  assert.ok(vm.l0.headline.includes('首 tick'), 'E1 文案自称首 tick 属实');
+  assert.equal(vm.tutorial!.text, TUTORIAL_TEXT_E1);
 });
 
-test('DQ-14 T-113②：首 tick ΔS_abs = 0 亦为教学卡；空 cause_ref 明确标注', () => {
+test('DQ-14 T-113②/D-16：真首 tick ΔS_abs = 0 亦为 E1 教学卡；空 cause_ref 明确标注', () => {
   const emptyRef = [{ ...attr({ causeType: '教学', refId: '', dS_i: 0, detail: '', suggested_verb: 'V1' }) }];
-  const vm1 = queryDiagnosis(makeSource([mkSnap({ tickId: 31, sOld: 50, sNew: 50, attribution: emptyRef })]), 31);
+  const vm1 = queryDiagnosis(
+    makeSource([mkSnap({ tickId: 0, cycleId: 0, cycleTickIndex: 0, sOld: 50, sNew: 50, attribution: emptyRef })]),
+    0,
+  );
   assert.equal(vm1.tutorial!.causeRefEmpty, true);
   assert.equal(vm1.tutorial!.explicitlyMarked, true);
   assert.equal(vm1.tutorialOnly, true);
+  assert.equal(vm1.emptyReason, 'E1_FIRST_TICK');
 
-  const vm2 = queryDiagnosis(makeSource([mkSnap({ tickId: 32, sOld: 50, sNew: 50, attribution: [] })]), 32);
+  const vm2 = queryDiagnosis(
+    makeSource([mkSnap({ tickId: 0, cycleId: 0, cycleTickIndex: 0, sOld: 50, sNew: 50, attribution: [] })]),
+    0,
+  );
   assert.equal(vm2.tutorialOnly, true);
   assert.equal(vm2.tutorial!.causeRefEmpty, true);
   assert.equal(vm2.l2.cards.length, 0, '空归因链绝不编造归因（AC-I8）');
+  assert.equal(vm2.emptyReason, 'E1_FIRST_TICK', 'GDD 05 E1 允许首 tick 归因链为空仍给 TUTORIAL 卡');
 });
 
 test('DQ-15 教学卡全局无「系统波动」类兜底文案；教学条目不计入具体原因', () => {
-  const vm = queryDiagnosis(makeSource([mkSnap({ tickId: 33, attribution: COLD_START })]), 33);
+  const vm = queryDiagnosis(makeSource([mkSnap({ tickId: 0, cycleId: 0, cycleTickIndex: 0, attribution: COLD_START })]), 0);
   const strings = allStrings(vm).join('|');
   for (const hint of GENERIC_HINTS) assert.equal(strings.includes(hint), false);
   assert.equal(vm.l0.cardCount, 0);
@@ -512,4 +542,54 @@ test('DQ-24 真实 SnapshotStore 端到端：结构化端口满足 + 查询前�
   assert.equal(chain.ticks.length, 1);
   assert.equal(JSON.stringify(store.get(60)), before, '真实存储查询前后逐字节一致（AC-I7）');
   assert.equal(store.size, 1, '查询未写入任何新条目');
+});
+
+// ---------------------------------------------------------------------------
+// D-16 专属：两种文案各自准确（quality-lead T-136 登记 S4）
+// ---------------------------------------------------------------------------
+
+test('DQ-25 D-16「非首 tick 无来源」：即使带教学占位条目，也不得自称首 tick', () => {
+  // 关键回归：tick-pipeline 在任意 cur.dS===0 的 tick 都会产出「教学」占位归因，
+  // 所以「有教学条目」≠「首 tick」。tickId=11 必须是 MISSING_SOURCE。
+  const snap = mkSnap({ tickId: 11, cycleId: 0, cycleTickIndex: 2, sOld: 50, sNew: 50, attribution: COLD_START });
+  const vm = queryDiagnosis(makeSource([snap]), 11);
+  assert.equal(vm.emptyReason, 'MISSING_SOURCE');
+  assert.equal(vm.tutorial!.reason, 'MISSING_SOURCE');
+  assert.equal(vm.l0.headline.includes('首 tick'), false);
+  assert.ok(vm.l0.headline.includes('数据缺失'));
+  assert.equal(vm.tutorial!.text, TUTORIAL_TEXT_MISSING_SOURCE);
+  assert.notEqual(vm.tutorial!.text, TUTORIAL_TEXT_E1, '不得误用 E1 文案');
+  // 数据诚实性保持：无兜底提示、traceable 如实、ΔS 双口径钉死、S 绝对值仍给
+  assert.equal(vm.traceable, true, '教学占位条目仍在、无来源抑制 → E1 例外口径不变');
+  assert.equal(vm.tutorial!.noAttributionDiagnosis, true);
+  assert.equal(vm.l2.coupling.deltaSDecompositionCarried, false);
+  assert.ok(vm.l2.coupling.basis.includes('不等于 ΔS_abs − ΔS'));
+  const strings = allStrings(vm).join('|');
+  for (const hint of GENERIC_HINTS) assert.equal(strings.includes(hint), false);
+});
+
+test('DQ-26 D-16「真首 tick」：tickId=0 / cycleId=0 / cycleTickIndex=0 才标 E1', () => {
+  const first = queryDiagnosis(
+    makeSource([mkSnap({ tickId: 0, cycleId: 0, cycleTickIndex: 0, sOld: 50, sNew: 50, attribution: COLD_START })]),
+    0,
+  );
+  assert.equal(first.emptyReason, 'E1_FIRST_TICK');
+  assert.equal(first.tutorial!.text, TUTORIAL_TEXT_E1);
+  assert.ok(first.l0.headline.includes('首 tick'));
+
+  // 三个判据逐个取反，任一不满足都不得标 E1（防止只凭教学条目判定）
+  const notFirstTick = mkSnap({ tickId: 1, cycleId: 0, cycleTickIndex: 0, attribution: COLD_START });
+  const wrongCycle = mkSnap({ tickId: 0, cycleId: 1, cycleTickIndex: 0, attribution: COLD_START });
+  const wrongCycleTick = mkSnap({ tickId: 0, cycleId: 0, cycleTickIndex: 1, attribution: COLD_START });
+  for (const s of [notFirstTick, wrongCycle, wrongCycleTick]) {
+    const vm = queryDiagnosis(makeSource([s]), s.tickId);
+    assert.equal(vm.emptyReason, 'MISSING_SOURCE', 'tickId=' + s.tickId + ' cycleId=' + s.cycleId + ' cycleTickIndex=' + s.cycleTickIndex);
+  }
+  // 首 tick 但丢过来源 → 如实标数据缺失，不用教学文案掩盖
+  const firstWithLoss = queryDiagnosis(
+    makeSource([mkSnap({ tickId: 0, cycleId: 0, cycleTickIndex: 0, attribution: [attr({ refId: '', dS_i: -1 })] })]),
+    0,
+  );
+  assert.equal(firstWithLoss.emptyReason, 'MISSING_SOURCE');
+  assert.equal(firstWithLoss.unsourcedSuppressed, 1);
 });

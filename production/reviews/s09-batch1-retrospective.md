@@ -14,6 +14,8 @@
 
 > S-09 第一批交付了诊断面板的**只读数据层**与**三态数据链最后一公里接线**：诊断查询 VM 从 Δ_t + 归因链汇聚 ux-spec §4.3 固定四段、支持跨 2~3 周期完整归因链与 L0/L1/L2 分层；`TickResult.flowState[]` 真正接入渲染层 `buildDrawList` 与 UI 图例，mock 彻底清除。quality-lead 独立复核 A 8/8 + B 8/8 全 PASS，**341/341 两次一致**，两次突变探针均撤销复绿。唯一剩余为生产侧「边槽→格」映射生成器（待接线、不阻塞本批），列为第二批显式关门项。
 
+> **后续订正（2026-11-07 · 主理人）**：本文档是**第一批收口时的历史快照**，§0 与 §5 中「生产侧映射生成器待接线」的表述已被第二批 T-137（模拟层 `edgeCells` + `flowEdgesFromTick`）关闭，quality-lead T-139 判关门项「已达成」、S-09 整体出口门 PASS。第二批完整收口见 `production/reviews/s09-retrospective.md`；此处保留原文以维持第一批判定与证据的可追溯性，不做改写。
+
 ---
 
 ## 1. 交付物总览
@@ -98,11 +100,15 @@
 
 ---
 
-## 8. 下一步（待用户拍板）
+## 8. 下一步（用户已于 2026-11-06 拍板）
 
-- **S-09 第二批**：L2 诊断面板 UI + 两级反馈可观测（即时 <100ms vs tick 后）、单屏 ≤1 数据面板的分层披露落地、面板与 L1 互斥、D-16 文案区分、`diagnosis` barrel 挂载、**生产侧「边槽→格」映射生成器作为显式关门项**。接线输入已就绪：`activeLayer`、四段卡片 `FourSegmentCard`、`actionVerb`、`queryDiagnosis` / `queryCycleRange`。
-- 或：先审阅本批交付（含 `s09-batch1-qareview.md`、本回顾），再进第二批。
-- 或：暂停开发，保留当前收口状态。
+用户拍板两项：**开第二批** + **生产侧「边槽→格」映射采用「模拟层补 `edgeCells`」方案**（QA 首选）。
+
+- **C 线 T-137（engineering-lead）**：`src/simulation/traffic.ts` 在 qSlot 写入处同步记录真实格索引 → `TrafficResult.edgeCells`（与 `flowState`/`qOverCap` 同长逐边对齐、未写入边槽诚实哨兵）；`tick-pipeline.ts` 透传；`src/render/flow-legend.ts` 增纯函数适配器 `flowEdgesFromTick`（不 import simulation）；端到端用例证明 `runTick → buildDrawList` 的 `OverlayDraw.cellIndex` 与 `edgeCells` 逐项一致。硬约束：`edgeCells` 纯视觉派生、不进计分链（AC-T8 ④）、确定性、格索引来自块拓扑严禁循环下标冒充、QA-T8 行数同步。
+- **D 线 T-138（engineering-ui）**：L2 诊断面板 UI（复用 `HudPanelState` 单值槽位、L1/L2 互斥、同屏 ≤1 面板、四段 + `actionVerb` 一次点按）、两级反馈 A/B 分离可观测、**D-16 文案区分**（「E1 首 tick 教学」vs「数据缺失：无可追溯来源」）、`diagnosis` barrel 挂 `src/ui/index.ts`（须保 D-14 断言、排查 star-export 歧义名）。硬约束：只读不重算、`src/ui/**` 零 `flow.*` 字面、SCAN-10 清单由 D 线独占维护。
+- **两线文件域严格隔离**：C 线独占 `src/simulation/**` / `src/render/**` / `src/index.ts` / `src/README.md` / `edge-cells*` / `render-flow-wiring*`；D 线独占 `src/ui/**` / `diagnosis-*` / `ui-static-scan.test.ts`；`production/reviews/**` 与追溯矩阵由主理人自改。防 D-15 双写覆。
+
+**第二批收口后**：quality-lead 独立复核 → 汇编 S-09 阶段回顾 → 主理人统一 `git commit`。
 
 ---
 
@@ -115,4 +121,4 @@
 
 ---
 
-*文档结束 · S-09 第一批收口 · A 线诊断数据层 + B 线真实 flowState 接线 · 341/341 全绿 · 第一批门 PASS（advisory）· 剩余「生产侧边槽→格映射」为第二批显式关门项*
+*文档结束 · S-09 第一批收口 · A 线诊断数据层 + B 线真实 flowState 接线 · 341/341 全绿 · 第一批门 PASS（advisory）· 用户已拍板开第二批（C 线 T-137 模拟层 edgeCells / D 线 T-138 L2 面板 UI 与两级反馈）· 提交 `900222b`*

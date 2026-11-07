@@ -96,7 +96,9 @@
 **订正结论（T-135 / T-136 复核后）**：
 - **`MOCK_FLOW_LEGEND` 已删除**，`src/ui/**` 全仓零 `mock` / 零 `pending:s04` 残留；`HUD-SCAN-7` 由「mock 必须保留」反向断言改写为「UI 不得定义/消费 mock 图例常量」正向断言，并经 quality-lead 突变测试证明非永真（注入 mock 即转红、撤销复绿）。
 - **接线函数已落地**：`src/render/flow-legend.ts`（142 行）提供 `FLOW_TOKEN_ID` 唯一映射、`buildFlowLegend`、`buildFlowOverlays(flowState, tokenMap, edgeToCell)`；`draw-list.ts` 一行未改（`deriveLine` + `options.overlays` 原有能力即可消费）。`RF-7` 用真实 `runTick` 产出的 `TickResult.flowState[]` 跑通 `buildDrawList` 全链，quality-lead T-136 判 **B 线 8/8 PASS**。
-- **仍待接线的部分（新遗留，非原观察项）**：模拟层 `solveTraffic` 按 R→I 块对写 `qSlot` 时未落 `cellIndex`，故**生产侧「边槽→格」映射生成器**尚未实现；`buildFlowOverlays` 的 `edgeToCell` 是必填显式入参，测试由用例充当视图模型提供映射，空映射诚实降级为空叠层。quality-lead T-136 判定为「**待接线、不阻塞第一批出门**」，归属建议：**列为 S-09 第二批收口验收的显式关门项**（首选模拟层在 `TrafficResult` 补 `edgeCells` 导出；备选视图模型基于邻接表构造并加运行时断言；**严禁**拿循环下标冒充 cellIndex）；若到 W5 准出未补，届时视觉正确性判 FAIL，不追溯改判本批。
+- **仍待接线的部分（新遗留，非原观察项）** → **已于 2026-11-07 关闭（T-137 / T-139）**：原记载为「模拟层 `solveTraffic` 按 R→I 块对写 `qSlot` 时未落 `cellIndex`，故**生产侧『边槽→格』映射生成器**尚未实现；`buildFlowOverlays` 的 `edgeToCell` 是必填显式入参，测试由用例充当视图模型提供映射，空映射诚实降级为空叠层。quality-lead T-136 判定为『待接线、不阻塞第一批出门』，归属建议：列为 S-09 第二批收口验收的显式关门项（首选模拟层在 `TrafficResult` 补 `edgeCells` 导出；备选视图模型基于邻接表构造并加运行时断言；严禁拿循环下标冒充 cellIndex）；若到 W5 准出未补，届时视觉正确性判 FAIL，不追溯改判本批。」（原判定保留备查）
+  **关闭依据**：用户拍板采用 QA 首选方案；T-137 在 `TrafficResult` 补 `edgeCells: Int32Array`（与 `flowState`/`qOverCap` 同长逐边对齐，值取 R 连通块代表格 `blockRep[rb]`，未写入槽为 `NO_EDGE_CELL=-1`），`TickResult` 透传，并新增生产侧纯函数 `flowEdgesFromTick(flowState, edgeCells, cellCount?)`；真实 `runTick → buildDrawList` 端到端数据链由 RF-12~14 / EC-1~12 验证。**quality-lead T-139 判定关门项「已达成」**（C 线 9/9 PASS、S-09 整体出口门 PASS）。
+  **转登记为 S-12 装配约束（不阻塞）**：① `edgeCells` 是通勤需求发起点 R 块代表格，**非路径经过格、不保证逐边唯一**（S-12 若沿路铺流线须补逐边路径格导出）；② 是 workspace 原地复用的活引用、下一 tick 覆写，装配层须**当帧消费或 `slice()`**，建议 S-12 加「不得跨帧持有」用例；③ 本项目当前**无应用装配层/组合根**，`preview/` 不跑 `runTick`，本批只落地「可被组合根调用的生产侧纯函数 + 模拟层数据导出 + 测试数据链」，**尚未接入真实场景上屏**——真实装配属 S-12，接线时须传 `cellCount = side*side` 启用越界过滤。按 T-136 约定：若 W5/准出未装配，届时**视觉正确性**判 FAIL，不追溯改判本批。详见 `production/reviews/s09-retrospective.md`。
 
 ---
 

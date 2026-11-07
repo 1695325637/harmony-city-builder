@@ -36,6 +36,25 @@ export const MAX_DETAIL_CARDS = 4;
 /** 教学卡显式标注文案（GDD 05 E1 / ux-spec §4.3） */
 export const TUTORIAL_LABEL = '教学';
 
+/**
+ * 无归因卡（tutorialOnly）时的**事实分类**（D-16）。
+ *
+ * 背景：第一批 `headline` 在 tutorialOnly 时无条件自称「首 tick 教学」，
+ * 但「非首 tick 且全部来源被抑制」也会进入该分支 → 标签与事实不符。
+ * quality-lead T-136 登记为 S4 / D-16。
+ *
+ * 判据（只看只读快照事实，不推断、不编造）：
+ * - `E1_FIRST_TICK`：冷启动首 tick（`tickId===0 && cycleId===0 && cycleTickIndex===0`，
+ *   与 `tick-pipeline.ts` 的 `isFirstTick = s.tickId === 0` 同口径）且无来源抑制 →
+ *   GDD 01 §6.1 E1 教学占位归因。
+ * - `MISSING_SOURCE`：非首 tick，或存在被抑制的无来源条目 → 数据缺失，如实标注。
+ * - `NO_SNAPSHOT`：`store.get(tickId) === null` → 该 tick 无快照记录。
+ *
+ * 注意：`教学` 占位归因由模拟层在**任意** `cur.dS===0` 的 tick 产生（非首 tick 也会有），
+ * 因此「有教学条目」不能单独证明是首 tick，必须以 `tickId` 为准。
+ */
+export type DiagnosisEmptyReason = 'E1_FIRST_TICK' | 'MISSING_SOURCE' | 'NO_SNAPSHOT';
+
 /** 建议动词：ux-spec §3.1 / §4.3 的三种一次点按可达操作 */
 export type ActionVerb = 'V3' | 'V4' | 'V5';
 export const ACTION_VERBS: readonly ActionVerb[] = Object.freeze(['V3', 'V4', 'V5']);
@@ -144,6 +163,8 @@ export interface TutorialCard {
   readonly label: typeof TUTORIAL_LABEL;
   /** 明确标注「教学」——cause_ref 为空时唯一允许的卡（ux-spec §4.3） */
   readonly explicitlyMarked: true;
+  /** D-16：这张卡为什么出现（E1 首 tick / 数据缺失 / 无快照），文案按此分类 */
+  readonly reason: DiagnosisEmptyReason;
   readonly causeRefEmpty: boolean;
   readonly text: string;
   readonly suggestedVerb: string;
@@ -195,6 +216,8 @@ export interface DiagnosisSummary {
   readonly direction: 'UP' | 'DOWN' | 'FLAT';
   readonly cardCount: number;
   readonly tutorialOnly: boolean;
+  /** D-16：tutorialOnly 时的准确原因；有归因卡时为 null */
+  readonly emptyReason: DiagnosisEmptyReason | null;
 }
 
 /** L1 · 因子行（≤ MAX_FACTOR_ROWS = 4） */
@@ -231,6 +254,8 @@ export interface DiagnosisViewModel {
   readonly l2: DiagnosisDetailView;
   readonly tutorial: TutorialCard | null;
   readonly tutorialOnly: boolean;
+  /** D-16：tutorialOnly 时的准确原因；有归因卡时为 null */
+  readonly emptyReason: DiagnosisEmptyReason | null;
   /** AC2：显著变化可追溯到 ≥1 条具体原因（教学首 tick 属 E1 例外） */
   readonly traceable: boolean;
   /** 无来源条目被抑制的数量（数据质量计数，机器可读；不是玩家兜底文案） */
