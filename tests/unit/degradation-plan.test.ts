@@ -111,8 +111,13 @@ test('DP-5 牙齿自证 B：关掉任一受保护能力 → 必须抛错（含 <
     const broken = { ...base.protectedState, [id]: false } as Record<ProtectedCapabilityId, boolean>;
     assert.throws(
       () => assertDegradationPlan(fakePlan(base, { protectedState: broken })),
-      /受保护能力.*必须保持启用/,
-      '把 ' + id + ' 关掉必须被拦——若此断言变绿，说明断言器退化成永真',
+      (err: unknown) => {
+        // 不依赖错误消息正则：断言器只需抛错即可，但归因必须能定位到被关掉的能力 id，
+        // 否则「别的错误让它变红」会被误记成牙齿生效。
+        assert.ok(err instanceof Error, '应抛 Error');
+        assert.ok(err.message.includes(id), '错误信息须点名被关掉的能力：' + id);
+        return true;
+      },
     );
   }
 });

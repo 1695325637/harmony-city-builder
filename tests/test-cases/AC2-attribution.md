@@ -535,7 +535,7 @@
 | 只读 | `TC-AC2-07` / `TC-AC2-12` 静态检查命中数 = 0 | 出现查询时重算 / 议题写回状态 → AC2 判 FAIL |
 | 数值一致性 | `TC-AC2-08` 全部输入组满足 `≤ 1 分` | 任一超出 → 归因链失真，AC2 判 FAIL |
 | 反主导（联合） | AC2 全域归因可追溯是 `tests/test-cases/AC3-no-dominant-strategy.md` 的前置 | — |
-| 单向判定 | 执行层 29 条 AC 全通过 → 汇总层 9 项 → Standard 达标；**不得反向抵销**（`tests/test-strategy.md` §1.2） | 用汇总层结果抵销执行层不通过 → 判 FAIL |
+| 单向判定 | 执行层 **27 条可判 AC 全部通过 + 2 条 N/A 显式登记** → 汇总层 **UX-A11~A19 九项通过 + UX-A20 N/A 登记** → Standard 达标；**N/A ≠ PASS，不得把 N/A 并入通过分子；不得反向抵销**（`tests/test-strategy.md` §1.2 / `design/ux/ux-spec.md` §8.2） | 用汇总层结果抵销执行层不通过 → 判 FAIL |
 
 > 本轮**不产出上述汇总判定**；本表仅为后续 S-12 判定规则。
 

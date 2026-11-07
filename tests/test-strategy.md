@@ -42,7 +42,7 @@
 | 常驻指标 | **恰好 3 项：满意度 / 预算结余 / 周期**；人口进次级面板 | `production/sprint-01.md` §2.4 裁定 2；`design/ux/ux-spec.md` C1 | 用例须逐项核对，不得出现第 4 项常驻 |
 | 主节奏控件 | **唯一「结束本日」**；首版无 ×1×2×4 倍速 / 自动播放 / 倒计时条 / 独立暂停菜单 | 同上裁定 3；`design/ux/ux-spec.md` §4.1 / UX-AC2 | 用例须含「不存在」反向断言 |
 | 网格 | **32×32 硬上限 / 16×16 起步**，按里程碑解锁 | `docs/architecture/architecture.md` §10.2；`design/gdd/systems/02-map-zoning.md` §3.1 | 用例 >32×32 须被显式拒绝 |
-| 可访问性层级 | **29 条 AC = 执行层**、**9 项大项 = 汇总层**；29 条全通过 → 9 项通过 → Standard 达标；**反向不成立** | `design/accessibility/accessibility-matrix.md` §2.11；`design/ux/ux-spec.md` §8.2 | 判定链写成单向，禁止用汇总层抵销执行层 |
+| 可访问性层级 | **29 条 AC = 执行层（27 可判 + 2 条 N/A）**、**10 项大项 = 汇总层（UX-A20 为 N/A）**；**27 条可判全通过 + 2 条 N/A 显式登记 → UX-A11~A19 九项通过 + UX-A20 N/A 登记 → Standard 达标**；**N/A ≠ PASS，不计入通过分子，禁止写「29 条全通过 / 十项全通过」；反向不成立** | `design/accessibility/accessibility-matrix.md` §2.12；`design/ux/ux-spec.md` §8.2 | 判定链写成单向，禁止用汇总层抵销执行层，禁止把 N/A 并入「通过」 |
 | 反馈分层 | <100ms 即时反馈与 tick 解耦（双通道 + 乐观视图 + VM） | `docs/architecture/adr/ADR-004-ui-feedback-decoupling.md` §2 | 用例覆盖「默认暂停且未发生任何 tick」下的即时反馈 |
 | 归因 | 结算时记录、查询只读不重算 | `docs/architecture/adr/ADR-003-save-data-and-attribution.md` §2 / §8 A4 | AC2 用例须含只读断言 |
 | 确定性 | 同一 (S_t, 命令, 配置) 回放逐字节一致 | `docs/architecture/adr/ADR-002-simulation-loop-and-snapshot.md` §2 / §7 A1 | 回放类用例须带 configHash / seed |
@@ -58,8 +58,8 @@
 | GDD 03 | `design/gdd/systems/03-traffic-commute.md` v1.1 | §3、**§3.5 流线三态判定口径（T-130 新增）**、§4、§6 边缘 E1~E7、§7 AC-T1~T8 |
 | GDD 04 | `design/gdd/systems/04-budget-economy.md` v1.0 | §3、§4.5 C-1~C-3、§6 边缘 E1~E7、§7 AC-E1~E8 |
 | GDD 05 | `design/gdd/systems/05-issues-diagnosis.md` v1.0 | §3、§4、§6 边缘 E1~E8、§7 AC-I1~I8 |
-| UX | `design/ux/ux-spec.md` v1.0 | §2、§3.3、§4.1「结束本日」、§7 E1~E8、§8.1 UX-AC1~9、§8.2 UX-A11~A19 |
-| 可访问性 | `design/accessibility/accessibility-matrix.md` v0.2 | §2 的 26 条 AC（当时基线；v0.3 起 29）、§2.10、§2.11 九条映射、§5 记录模板 |
+| UX | `design/ux/ux-spec.md` v1.0 | §2、§3.3、§4.1「结束本日」、§7 E1~E8、§8.1 UX-AC1~9、§8.2 UX-A11~A20 |
+| 可访问性 | `design/accessibility/accessibility-matrix.md` v0.2 | §2 的 26 条 AC（当时基线；v0.3 起 29）、§2.10、§2.11 九条映射、§5 记录模板〔**v0.3 · S-12 就地加注**：矩阵现为 **v0.3**；§2.10 = A-10 组、§2.11 = AC 汇总、**§2.12 = 10 条映射**；本行 26 / 九条 / v0.2 为历史基线，现行以 §1.2 层级纪律与 `design/ux/ux-spec.md` §8.2 为准〕 |
 | 美术 | `design/art/art-bible.md` v0.2 | §9.1 分级、§9.2 特性矩阵、§9.4 建议基线 |
 | 架构 | `docs/architecture/architecture.md` v1.0 | §3 双循环 / §3.2 P0~P8 / §3.2.1 D6 解环 / §4 快照 / §10 校准 / §13 G1~G12 |
 | 控制清单 | `docs/architecture/control-manifest.md` v1.0 | §1 一页规则、§2 R-01~R-14、§3 G1~G12、§5.1 K-1~K-5 回填 |
@@ -97,7 +97,7 @@
 - ❌ 在 `tests/playtest-report-template.md` 预填任何判定、时间、受试者数据或结论。
 - ❌ 用「设计层 PASS（文档层）」冒充「实测 PASS」——`docs/architecture/architecture.md` §13 的 PASS 是**架构文档层**结论，不是 QA 实测结论。
 - ❌ 把建议基线写成「已达 30fps」「<100ms 已满足」等定稿表述。
-- ❌ 用汇总层 9 项通过反推执行层 29 条 AC 通过（判定链单向，见 §1.2）。
+- ❌ 用汇总层九项（或十项）通过反推执行层 29 条 AC 通过；**也不得把 2 条 N/A 并入「通过」凑满 29**（判定链单向、N/A ≠ PASS，见 §1.2 / `design/ux/ux-spec.md` §8.2）。
 
 ### 2.2 VDD 流程与本轮所处位置
 
@@ -133,7 +133,7 @@
 | L1 | **数据层单测** | schema 序列化 / 32×32 上限 / 配置表注入与 `configHash` / 分区枚举 / 快照自包含 / 原子写与故障注入 | `production/epics/epic-breakdown.md` §4 S-02 / S-05 / S-10；ADR-002 §7；ADR-003 §8 | 自动 | 纯 TS 单测（脱离真机、mock `ISaveStorage`）、确定性回放断言 | 否 |
 | L2 | **模拟层确定性回放** | `F(S_t, commands, config)` 纯函数、P0~P8 顺序、逐字节一致、默认暂停、InputGate 幂等、四因子单调性、D6 曲线、回退无逆运算 | `docs/architecture/architecture.md` §3；ADR-002；GDD 01~04 §7 | 自动 | 黄金路径回放、快照 + Δ + 归因链比对、配置注入回放 | 否 |
 | L3 | **渲染与 UI 集成** | 双通道 <100ms 反馈、乐观视图回滚、常驻 3 指标、同屏 ≤1 数据面板、V1~V9 可达、L2 诊断面板、两级反馈、形态重排 | ADR-004；`design/ux/ux-spec.md` §3 / §8 | 自动 + 半自动 | 交互回归、截图回归、帧录制计时断言、去色 / 色盲模拟 | **是** |
-| L4 | **系统回归 / 门禁** | AC1–AC4 汇总、D-1~D-7、G1~G12 复核、29 条 AC 执行层 + 9 项汇总层、S-01~S-12 验收条件逐条证据、性能基线校准（建议基线口径） | `tests/test-cases/dod-gates.md`；`docs/architecture/control-manifest.md` §3 | 半自动 + 证据评审 | 回归套件、检查表、校准报告、证据 ADEQUATE 评审 | **是** |
+| L4 | **系统回归 / 门禁** | AC1–AC4 汇总、D-1~D-7、G1~G12 复核、29 条 AC 执行层（含 2 条 N/A）+ 10 项汇总层（UX-A20 为 N/A）、S-01~S-12 验收条件逐条证据、性能基线校准（建议基线口径） | `tests/test-cases/dod-gates.md`；`docs/architecture/control-manifest.md` §3 | 半自动 + 证据评审 | 回归套件、检查表、校准报告、证据 ADEQUATE 评审 | **是** |
 | L5 | **人工 Playtest** | AC1 无外部说明 10 min + 因果理解、AC3 Expression 主观复核、AC4 单次会议 5–12 min 节奏、慢 / 快受试者判定 | `design/concept/game-concept.md` §5.2；`tests/playtest-report-template.md` | 人工 | 招募 + 主持脚本 + 观察记录表 + 事后访谈 + 计时原始数据 | **是** |
 
 **分层纪律**：L1/L2 不依赖真机与渲染，是 CI 信号的主干；L3/L4 真机结果须回写 L1/L2 的黄金路径；L5 主观结论不得替代 L1~L4 的可判定断言（AC1「理解因果」只能由 L5 判据判定，但「10 分钟内完成首个周期」须同时有 L2/L4 的事件链证据）。
@@ -212,7 +212,7 @@
 | --- | --- | --- |
 | E-1 | AC1 / AC2 / AC3 / AC4 **逐条实测 PASS**（含 L5 人工 Playtest 判定） | Playtest 报告 + 事件链证据 + 回放记录 |
 | E-2 | D-1~D-7 全部门禁通过 | `tests/test-cases/dod-gates.md` 检查表 |
-| E-3 | **执行层 29 条 AC 全部通过 → 汇总层 UX-A11~A19 九项通过 → 可访问性 Standard 达标**；低档位完整复跑留记录；反向不成立 | 29 条逐条记录 + 汇总映射表 |
+| E-3 | **执行层 27 条可判 AC 全部通过 + 2 条 N/A 显式登记 → 汇总层 UX-A11~A19 九项通过 + UX-A20 N/A 登记 → 可访问性 Standard 达标**；**N/A ≠ PASS，不计入通过分子**；低档位完整复跑留记录；反向不成立 | 29 条逐条记录（含 2 条 N/A 理由与条件重开条款）+ 10↔29 汇总映射表 |
 | E-4 | G1~G12 复核；S-01~S-12 每条验收条件有对应证据 | 门禁检查表 + Story 用例索引 |
 | E-5 | 证据评审全部 ADEQUATE；无 INCOMPLETE / MISSING 未关闭项 | 证据评审记录 |
 | E-6 | 无未关闭 S1 / S2 缺陷；S3 / S4 已登记进回归清单；flaky 用例已隔离 | 缺陷台账 + flaky 隔离记录 |
@@ -348,7 +348,7 @@ MISSING / INCOMPLETE 的用例**一律不计入 PASS**，须补证后重判；�
 
 ## 12. 追溯矩阵与覆盖缺口口径
 
-- `tests/traceability-matrix.md` 对 AC1–AC4 / D-1~D-7 / UX-AC1~9 / 26 条执行层 AC / 9 项汇总层 / S-01~S-12 / 37 条 GDD 验收编号 / G1~G12 / W0~W5 / 用例编号**逐行映射**。
+- `tests/traceability-matrix.md` 对 AC1–AC4 / D-1~D-7 / UX-AC1~9 / **29 条执行层 AC（27 可判 + 2 条 N/A）** / **10 项汇总层（UX-A20 为 N/A）** / S-01~S-12 / **38 条 GDD 验收编号** / G1~G12 / W0~W5 / 用例编号**逐行映射**（分母 **121**，见矩阵 §1.1）。
 - **「追溯矩阵无缺口」的定义**：矩阵中每个上游验收编号都有映射行，且每行都有明确状态、指向与责任/前置标注 —— 即**追溯链无断点**；**不等于「每个验收项都已有可执行并已通过的用例」**。
 - 覆盖状态枚举：`COVERED`（用例齐备·待执行）/ `PARTIAL`（部分覆盖或阈值待定）/ `PLAYTEST-ONLY`（仅人工 Playtest 可判定）/ `NEEDS-BUILD`（须等可玩版本或校准报告才能补判据）/ `GAP`（尚无用例）。
 - 全局状态：**本轮全部用例均为「待执行」**；凡依赖真机 / 受试者 / 校准报告的项另标 `NEEDS-BUILD`。

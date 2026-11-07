@@ -6,7 +6,7 @@
 | 数据源 | 共享任务台账（60 条）+ git 提交历史 + `production/reviews/s12-closure.md` + 当前工作树复跑 |
 | 任务口径 | 这里的「完成」指**该任务交付物已落盘并复跑通过**；不等于 S-12 整体 PASS、也不等于真机验证 |
 | 当前 HEAD | `5a15206` · 工作树干净 |
-| 当前验证 | **571 tests / 569 pass / 0 fail / 2 skipped**；tsc 三入口 EXIT=0 |
+| 当前验证 | **574 tests / 572 pass / 0 fail / 2 skipped**；tsc 三入口 EXIT=0 |
 
 > **结论先行**：60 条任务 **59 completed / 1 in_progress / 0 pending**。
 > 唯一未完成的 #59 是 **S-12 真机侧**，属用户拍板的「分期结项：离线 PASS + 真机 BLOCKED」中的未结半侧，
@@ -140,6 +140,7 @@
 | S-10 收口 | 463 | 463/463 |
 | S-11 收口 | 524 | 524/524 |
 | S-12 离线批 | 553 → 558 → 564 → 571 | **571 / 569 pass / 0 fail / 2 skipped** |
+| S-12 三条复核收口（本批） | **574**（+3 = `tests/unit/a11y-wiring-guard.test.ts` WG-1~3） | **574 / 572 pass / 0 fail / 2 skipped** |
 
 ### 2.4 S-12 六条验收判定（来自 `production/reviews/s12-closure.md`）
 
@@ -158,10 +159,12 @@
 
 ## 三、唯一未完成项 #59 展开（准出阻塞，不因离线收口解除）
 
-**A. 三条 fresh-eyes 独立复核**（限流重置 2026-11-08 09:17 后派发；本批主理人代改过验收层，按纪律必须复核）
-1. `s12-a11y-gate` 复核 `AC-A10-1` 新口径、`LAY-7`、`degradation-plan.test.ts`、`token-text-safety.test.ts`、`composition-root.test.ts`；
-2. `s12-arch-sweep` 复核并署名 `production/reviews/s12-architecture-evidence.md`（三层证据链）；
-3. `s12-design-a11y` 核对 `ux-spec` 主理人代改段（判定链 29/十项、UX-A20 行、UX-A13、L280 笔误订正）。
+**A. 三条 fresh-eyes 独立复核 —— 已完成**（2026-11-07 派发并全部返回）
+1. `s12-a11y-gate`：**CONDITIONAL FAIL**（可执行层 PASS / 口径一致性层 FAIL）；复核 `AC-A10-1` 新口径、`LAY-7`、`degradation-plan.test.ts`、`token-text-safety.test.ts`、`composition-root.test.ts`，并完成 3 处反向突变。
+2. `s12-arch-sweep`：**附条件通过**；复核并署名 `production/reviews/s12-architecture-evidence.md`（三层证据链），5 项待订正已全部补齐。
+3. `s12-design-a11y`：**附条件通过**；核对 `ux-spec` 主理人代改段（判定链 29/十项、UX-A20 行、UX-A13、L280 笔误订正），design 内 16 处订正已完成。
+
+**主理人已按三条复核的发现逐条订正并统一复跑**；**#59 整体仍 in_progress**：三条复核已销项，剩余为真机侧（B 段）。
 
 **B. 真机环境就绪后**（EX-04 已登记「S-12 窗口到期、准出阻塞不解除」）
 - EX-01 `SM-W1-04` 生命周期；EX-02 S-06 ③b 格式探测写入校准记录；

@@ -94,8 +94,9 @@ test('LAY-7 重排：节点 id 恒定，产出 reuse / move 操作，绝不 rese
   assert.ok(ops.every((o) => o.kind === 'reuse' || o.kind === 'move'), '只产出 reuse / move，不 reset / 不移除');
   assert.ok(ops.every((o) => o.kind === 'reuse'), '三形态比例统一后，形态切换全走 reuse（ADR-005）');
 
-  // move 分支仍须可用：用「旧比例」合成模型（手机 0.13/0.69/0.18）与现行模型对排
-  const legacy = {
+  // move 分支仍须可用：用「旧比例」合成模型（手机 0.13/0.69/0.18）与现行模型对排。
+  // 显式标 HudLayoutModel（不用 `as never` 之类的类型逃逸），让字段缺失 / 类型不符直接编译期报错。
+  const legacy: HudLayoutModel = {
     formFactor: 'unfolded',
     segments: {
       statusBar: { id: 'statusBar', heightRatio: 0.13, minHeightDp: 48 },
@@ -107,7 +108,7 @@ test('LAY-7 重排：节点 id 恒定，产出 reuse / move 操作，绝不 rese
     performanceTier: 'default' as const,
     degraded: false,
   };
-  const opsMove = reconcileLayout(legacy as never, a);
+  const opsMove = reconcileLayout(legacy, a);
   assert.ok(opsMove.every((o) => o.kind === 'reuse' || o.kind === 'move'), '只产出 reuse / move，不 reset / 不移除');
   assert.ok(opsMove.some((o) => o.kind === 'move'), '比例有差异时应产生 move（分支未被删除）');
 });

@@ -6,10 +6,10 @@
 | 用户裁定 | **分期结项：离线 PASS + 真机 BLOCKED**（2026-11-07）；S-12 台账记「离线收口，真机待执行」 |
 | 判定纪律 | EX-03 双层口径：**纯逻辑 / 内存模拟介质侧按原判据可判 PASS；真机半侧一律 PARTIAL / BLOCKED**，不写「已验证 / 已达标」 |
 | 基线 | `a322223` → `7972870` → `ce621a2` → `7bdf02a` → `d173700` → 本批 |
-| 复核状态 | **离线侧由主理人代拟初稿，待限流恢复后三条 fresh-eyes 复核**（见 §7） |
+| 复核状态 | **三条 fresh-eyes 复核已完成（2026-11-07）**：`s12-a11y-gate` 判 CONDITIONAL FAIL（可执行层 PASS / 口径一致性层 FAIL），`s12-arch-sweep` 与 `s12-design-a11y` 附条件通过；主理人已按发现逐条订正并统一复跑，见 §7 |
 
 > **诚实性声明（先读）**：本报告的「离线 PASS」指**离线可验部分按实际证据判定**，不是「S-12 整体 PASS」。
-> 29 条可访问性 AC 中 2 条 N/A、多条 B 档（fixture 断言 / 无生产证据）、2 条 C 档（真机唯一），
+> 29 条可访问性 AC 中 2 条 N/A（`AC-A10-1`「**不适用（无适用对象）· 条件重开**」、`AC-A10-2`「**不适用（无对象）· 条件重开**」）、多条 B 档（fixture 断言 / 无生产证据）、2 条 C 档（真机唯一），
 > **不存在「29 条全通过」这一结论**。真机侧（验收 1 / 4 / 5 及 EX-01/02/03、K-4）仍为准出阻塞。
 
 ---
@@ -70,9 +70,9 @@
 
 | 证据 | 结果 |
 | --- | --- |
-| 全量测试 | **571 tests / 569 pass / 0 fail / 2 skipped**（skip = AC-A06-1 单手 Playtest、AC-A08-1 上游音频清单） |
+| 全量测试 | **574 tests / 572 pass / 0 fail / 2 skipped**（含本批新增 `tests/unit/a11y-wiring-guard.test.ts` WG-1~3；skip = AC-A06-1 单手 Playtest、AC-A08-1 上游音频清单） |
 | tsc 三入口 | `EXIT=0`（`src/index.ts` / `src/ui/index.ts` / `src/save/index.ts`） |
-| 门禁 | `tests/verification/s12-a11y-gate.test.ts` 29 条 AC 编号化，牙齿自证两处突变（阈值类 / 结构类）能变红 |
+| 门禁 | `tests/verification/s12-a11y-gate.test.ts` 29 条 AC 编号化，牙齿自证两处突变（阈值类 / 结构类）能变红；新增 `tests/unit/a11y-wiring-guard.test.ts` **WG-1~3 第四类证据断层守卫** |
 | 降级契约 | `tests/unit/degradation-plan.test.ts` 6 条（含两组牙齿自证） |
 | 令牌守卫 | `tests/unit/token-text-safety.test.ts` 5 条（实算自洽 / 硬禁扫描 / 合成违规必报红） |
 | 组合根闭环 | `src/composition.ts` + `tests/unit/composition-root.test.ts` 7 条（CR-1~7）：初始态 tick 0 KEYFRAME 可回退、P8 落盘、`onBackground()` 强存、回退补存与幂等不空转、`config.unlockedSide` 零改动、无时钟/平台依赖、`archiveInitial:false` 可判定失败 |
@@ -95,10 +95,11 @@
 2. 「性能已达标」——§10.1 数字仍为建议基线、未冻结、无实测；
 3. 「48dp 已重验」——重验须针对真机真实渲染热区矩形。
 
-**待限流恢复后的复核清单**（本批主理人代改过验收层，按纪律必须 fresh-eyes）：
-1. `s12-a11y-gate`：复核 `AC-A10-1` 新口径、`LAY-7`、降级契约、`textSafe` 守卫；
-2. `s12-arch-sweep`：复核并署名三层证据文档；
-3. `s12-design-a11y`：核对 `ux-spec` 代改段（判定链 29/十项、`UX-A20` 行）。
+**三条 fresh-eyes 复核结果（已完成）**：
+1. `s12-a11y-gate`：CONDITIONAL FAIL（可执行层 PASS / 口径层 FAIL）；已完成 3 处反向突变；主理人已修判定链不可满足、`token-text-safety` 头注释过度声称、`LAY-7` 的 `as never`、`DP-5` 正则归因、`AC-A10-1` 三形态 `statusBar=0.1` 精确断言、gate 文件头旧词与 `AC-A05-2` 状态词。
+2. `s12-arch-sweep`：附条件通过；证据文档 5 项待订正已全部补齐（EX-04、牙齿证据、行号 111-124、R-3/R-5 编号、ADR-005 §5/§7 索引），并追加「主理人订正回执」。
+3. `s12-design-a11y`：附条件通过；design 内 16 处订正已完成，本批再补齐 §6.2 / 矩阵 §2.12 / §5 的 N/A 判定链与 UX-A20 悬空引用。
+4. **第四类证据断层守卫已落地**：新增 `tests/unit/a11y-wiring-guard.test.ts`（WG-1~3），把 `gapDp` 赋值 / `assertSpacing(` 调用点的零接线状态变成会随代码变红的机器断言；**守卫落地 ≠ `AC-A05-2` 销项**，该 AC 仍为 B 档 · PENDING-API / 不销项。
 
 **其它开放项**（不与本批结项冲突，登记留痕）：软着陆 GDD 04 §3.3②「抑制新增建设」、解锁形状「边长阶梯 +2」钉定、跨会话全局幂等（H3 开启时由 SaveService epoch 命名空间承担）、`AC-A05-2` 生产侧接线（三条重验门槛）。
 

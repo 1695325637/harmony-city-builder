@@ -19,7 +19,8 @@
  *   与 2.1.3.4 **不是同一份文档**，不得混引）。台账 **27 → 29 条**。
  *   ⚠️ 这两条当前都**判不了**：A10-1 本项目**无滑动控件对象**（记「不适用」+ 条件重开）、
  *   A10-2 无字号数据源（记「不适用」+ 条件重开）。**N/A ≠ PASS，不得据此宣称「29 条全通过」。**
- *   本文件对它们的处置是**如实报实测值 + 判据不闭合登记**，不记「达标」也不记「不达标」。
+ *   本文件对它们的处置是**如实报实测值 + 不适用（无适用对象）登记 + 条件重开触发说明**，
+ *   不记「达标」也不记「不达标」；N/A 不计入通过分子。
  *
  * ============================================================================
  * 一、本文件**不判什么** / 为什么 / 需要什么介质
@@ -60,7 +61,10 @@
  * （`design/accessibility/accessibility-matrix.md` §5 执行模板）人工签收。
  *
  * ============================================================================
- * 三、分档定义（A / B / C 三档；`PENDING-API` 已随 `gapDp` 落地解除，AC-A05-2 转 B）
+ * 三、分档定义（A / B / C 三档；`PENDING-API` 已随 `gapDp` 落地解除，AC-A05-2 转
+ *    **「B 档 · 断言器自测」**，但该 AC 本身**仍为 PENDING-API / 不销项**——
+ *    生产侧 `assertSpacing` 零调用点、`gapDp` 零生产者，用例通过只证明断言逻辑正确，
+ *    不构成 AC-A05-2 的验收证据。两种状态词必须成对出现，不得只写「转 B」）
  * ============================================================================
  *
  * | 档 | 含义 | 本文件中的形态 |
@@ -1002,13 +1006,16 @@ test('AC-A10-1 滑动控件高度 ≥ 屏高 20%（不适用 · 无适用对象 
     assert.ok(m.statusBar + m.thumbZone <= coverageCap + 1e-9, formFactor + ' statusBar+thumbZone = ' + (m.statusBar + m.thumbZone) + ' > 0.30，违反 art-bible §2.4「UI 常驻覆盖率 ≤30%」');
     assert.ok(m.canvas >= officialMinRatio, formFactor + ' canvas 实测 ' + m.canvas + ' < 0.20（数据与预期不符，请复核 createLayoutModel）');
   }
-  // 三段实测值（三形态统一），供裁定方与真机批次直接引用
+  // 三段实测值（三形态统一 0.10 / 0.70 / 0.20），供裁定方与真机批次直接引用
   assert.equal(measured.folded.canvas, 0.7);
   assert.equal(measured.folded.thumbZone, 0.2);
+  assert.equal(measured.folded.statusBar, 0.1, 'folded statusBar 未钉死——若被抬回 0.12/0.13，常驻覆盖会重新顶破 0.30');
   assert.equal(measured.unfolded.canvas, 0.7);
   assert.equal(measured.unfolded.thumbZone, 0.2);
+  assert.equal(measured.unfolded.statusBar, 0.1, 'unfolded statusBar 未钉死');
   assert.equal(measured.tablet.canvas, 0.7);
   assert.equal(measured.tablet.thumbZone, 0.2);
+  assert.equal(measured.tablet.statusBar, 0.1, 'tablet statusBar 未钉死');
 });
 
 test('AC-A10-2 文本字号 ≥ 8vp 必须 / ≥ 12vp 宜（不适用 · 无对象 · 条件重开）', () => {
