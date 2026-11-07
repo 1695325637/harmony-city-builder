@@ -10,7 +10,7 @@
 
 > **结论先行**：60 条任务 **59 completed / 1 in_progress / 0 pending**。
 > 唯一未完成的 #59 是 **S-12 真机侧**，属用户拍板的「分期结项：离线 PASS + 真机 BLOCKED」中的未结半侧，
-> 阻塞原因是**缺少真机介质**（EX-01/02/03、K-4）与三条待恢复的 fresh-eyes 复核，不是实现缺陷。
+> 阻塞原因是**缺少真机介质**（EX-01/02/03、K-4），不是实现缺陷；**三条 fresh-eyes 复核已于 2026-11-07 全部完成并销项**（见 §三 A）。
 
 ---
 
@@ -103,7 +103,7 @@
 | 56 | 四处对比度 / 口径歧义美术裁定建议（只读） | s12-art-rulings | ✅ completed | disabled 1.70 / inkWeak 2.31 / CIVIC 3.97 / thumbZone 口径；三处实测复现 |
 | 57 | HUD 三段比例 0.10/0.70/0.20 + inkWeak 降非文字令牌 + 静态扫描守卫 | s12-layout-code → 主理人接手 | ✅ completed | ADR-005；`token-text-safety.test.ts` 5 条（原 worker 429 中断） |
 | 58 | 验收 3 降级顺序可执行契约 + 分期结项报告 + EX-04 窗口到期登记 | 主理人 | ✅ completed | `degradation-plan.ts` + DP-1~6；`s12-closure.md`；quality-closure v1.3 |
-| **59** | **S-12 真机侧待执行：EX-01/02/03 + K-4 + 验收 1/4/5 + 三条 fresh-eyes 复核** | — | 🔄 **in_progress** | **唯一未完成项**，详见 §三 |
+| **59** | **S-12 真机侧待执行：EX-01/02/03 + K-4 + 验收 1/4/5**（三条 fresh-eyes 复核已销项，见 §三 A） | — | 🔄 **in_progress** | **唯一未完成项**，详见 §三 |
 | 60 | S-12 组合根接线（初始态 tick 0 归档 / P8 落盘 / 强存 / 回退·解锁后补存） | 主理人 | ✅ completed | `src/composition.ts` 220 行 + `composition-root.test.ts` CR-1~7 |
 
 ---
