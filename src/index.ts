@@ -13,6 +13,7 @@ export * from './simulation/snapshot.ts';
 export * from './simulation/traffic.ts';
 export * from './simulation/tick-pipeline.ts';
 export * from './simulation/session.ts';
+export * from './save/index.ts';
 
 // 渲染层（S-06）：引擎无关内核 + 注入式 Cocos 适配（不 import 'cc'）
 export * from './render/iso.ts';

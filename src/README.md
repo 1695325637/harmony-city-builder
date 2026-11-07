@@ -32,7 +32,7 @@
 | `src/simulation/snapshot.ts` | 258 | **T-116 最小内存实现**：`buildTickSnapshot` + `createInMemorySnapshotStore`（Keyframe/Delta 规则、冷归档恢复走 `deserializeState`、D-01 联动；介质为内存模拟，持久化留 S-05/S-09）；**T-133 `TickSnapshot.flowState` 标 `pending:S-05`（纯视觉派生，渲染层下发图例即可，不进冷归档）** |
 | `src/simulation/tick-pipeline.ts` | 454 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）**；**T-137 `TickResult.edgeCells` 透传 `TrafficResult.edgeCells`（逐边落点，纯视觉派生）** |
 | `src/simulation/session.ts` | 100 | 编排层 `createSimulation`：仅 `advanceDay`（V6）触发结算，连点幂等，结算中 gate 锁定；**T-116：入口 `assertConfigCompatible`（D-01 修复点 2）** |
-| `src/index.ts` | 27 | 统一导出（T-135 增 `render/flow-legend.ts` 出口） |
+| `src/index.ts` | 28 | 统一导出（T-135 增 `render/flow-legend.ts` 出口；**T-140 增 `save/index.ts` 出口**） |
 | `tests/unit/*.test.ts` | 869 | 8 个测试文件 / 51 条断言用例（7 文件 45 条基线 + `d01-config-compat.test.ts` 6 条 D-01 回归，见 §4） |
 | `tests/verification/*.test.ts` | 1238 | `edge-cases.test.ts`（quality-lead T-114，12 条；T-116 仅 V-06/V-STATIC 按修复后契约改写）+ `cold-archive-s05.test.ts`（6 条）+ `perf-s04.test.ts`（3 条） |
 
@@ -106,6 +106,28 @@
      `channels = ['color','shape','text']`（`CHANNELS_STATIC`），对**纯图形按钮属过度声明**
      （无文字、press 无形状）——该项归 S-08 与 D-13 一并处理（按容器能力派生通道），
      本单不改 `src/ui/**`。
+
+### 2.3 存档层索引（S-10 / T-140 落地）
+
+> ⚠️ **介质口径**：本层为**内存模拟介质**实现（`ISaveStorage` 抽象），
+> 真机 HarmonyOS 应用沙箱 / KV 偏好、HAP 权限模型、杀进程与切后台的真实持久化
+> **未验证**（K-4 / `tests/quality-closure.md` EX-03 顺延，已登记为**准出阻塞项**）。
+> 所有「原子写 / 双槽 / 断点续玩 / 迁移」结论仅限定为「内存模拟介质可验证」。
+> `checksum` 用于**防误改 / 防写坏**，**不是反作弊 / 防篡改承诺，不做强加密**。
+
+| 路径 | 行数 | 职责 |
+| --- | --- | --- |
+| `src/save/types.ts` | 237 | `SaveSlot` / `SaveHeader`（五字段 + `saveTime` 仅展示）/ `ISaveStorage` / `InMemorySaveStorage` / `SaveStorageFaults` 故障开关 / `SaveMigration` / `LoadResult` / `SaveNotice`；H3 `RemoteSaveCapabilities` + `VersionVector` **能力位签名**、`SAVE_FEATURE_FLAGS.h3CrossDeviceSync` 默认关 |
+| `src/save/storage.ts` | 105 | `createInMemorySaveStorage()`：A/B 双槽内存介质、一次性故障注入（写中断 / IO 失败 / 读失败 / 人为损坏）、`corruptSlot` / `raw` / `clear`；`remote` 恒 `undefined`（零同步实现） |
+| `src/save/save-service.ts` | 458 | `createSaveService()` / `save()` / `load()`：A/B 交替原子写、`computeSaveChecksum` + 严格结构校验、损坏槽跳过 + 回退上一完好槽并提示、**显式迁移器链**（无迁移器拒绝载入并保留旧槽、禁止静默续算）、D-01 经 `deserializeState` / `assertConfigCompatible`、`buildSaveLedger`（≥3 周期冷归档） |
+| `src/save/index.ts` | 11 | 存档层统一出口（经 `src/index.ts` `export *` 对外） |
+
+- 恢复 = 原样 `deserializeState` 最近全量快照，**不推进 tick、不补算漏掉的 tick**；
+  五类字段（网格 / 预算 / 满意度 / 议题 / **解锁进度**）+ `ledger` + `prngSeed` 齐备。
+- **OD-2 A 红利**：`saveTime` 只由调用方注入作展示，本层不读任何时钟；
+  权限声明无后台保活 / 精确闹钟 / 离线任务，存档不含参与模拟计算的墙上时钟。
+- 用例：`tests/unit/save-service.test.ts`（SV-1~12）/ `save-slots.test.ts`（SL-1~10）/
+  `save-migration.test.ts`（MG-1~10），逐条对应 SM-W4-01/02/03 与 S-10 验收 1~5。
 
 ---
 

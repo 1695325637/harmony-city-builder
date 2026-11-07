@@ -99,6 +99,12 @@
 | D-02 | S3 | 同类型连通块数超过 `maxBlocks=64` 时静默截断（无事件、无标记），极端布局下丢块不可观测 | **S-04**（求解器真机/替换交接验收） | S-04 交接验收时复跑本报告 §2 场景 A（棋盘 512 块）：断言截断时**必须有可观测信号**（SimEvent 新类型或 stage trace 中记录「实际块数 vs maxBlocks」），不接受无信号静默丢弃；该断言写入 S-04 Story 验收标准 |
 | D-03 | S3 | `runTick` 层无幂等（纯函数契约，幂等由 CommandQueue / session 承担），分层契约未文档化 | **S-10**（存档/断点续算验收） | S-10 验收时：① 复跑 V-05 连点用例（session 层幂等，已有）+ 存档恢复后 `seenAdvanceKeys` 重建语义用例；② 在 S-10 Story 文档化「runTick 调用方必须经 CommandQueue 去重」契约，并加一条「直接重复投递同 idempotencyKey 到 runTick 会重复结算」的对照用例，把该行为钉为显式契约而非缺陷 |
 
+> **口径订正（2026-11-07 · 主理人裁定，T-141 交付后）**：上表 ② 中「直接重复投递同 `idempotencyKey` 到 `runTick` 会**重复结算**」是 T-116 当时的**跟踪写法**，按 ADR-002 §2 子决策 1/3 与 `runTick` 实际语义应区分两件事：
+> - **重复应用**（本表实际所指）：同一 tick 原子事务内命令被逐条应用、后者覆盖前者、溯源出现重复键 —— `runTick` 确实不二次校验，这是**纯函数契约事实**；
+> - **重复结算（多 tick 提交 / 多个 `TickCommitted`）**：由 `advanceDay` 的 `seenAdvanceKeys` + `InputGate` 在**编排层**防住，不是 `runTick` 的职责。
+>
+> 因此本表措辞的准确读法是「重复应用」，**不得据此推断 `runTick` 会产生多个 tick 提交**。T-141 已按实现事实在 `tests/verification/s10-idempotency-contract.md §2.2` 写明该区分，并以 `ID-03`（重复应用）/ `ID-04`（重复 `ADVANCE` 仍只 1 个 `TickCommitted`）两条对照用例钉死；D-03 契约文档化与用例已交付、D-03 关闭。**本表原文保留备查，不改写历史判定**，仅加此订正注记（依据：主理人 2026-11-07 裁定；`s10-idempotency-contract.md`；T-141 回执待裁定项 ①）。
+
 ---
 
 ## 5. 最终测试运行汇总（本机真实执行）
