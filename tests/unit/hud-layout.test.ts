@@ -82,13 +82,34 @@ test('LAY-6 折叠态 + 无 provider → 降级且安全区用 fallback（[0,0,0
 });
 
 test('LAY-7 重排：节点 id 恒定，产出 reuse / move 操作，绝不 reset / 移除', () => {
+  // 【ADR-005 后（2026-11-07）】三形态 segmentRatios 统一为 0.10/0.70/0.20，
+  // 形态切换不再产生高度差 → reconcileLayout 全走 reuse、不再产出 move。
+  // 「形态切换应产生 move」这一旧前提已随 ADR-005 失效；move 分支仍存在，
+  // 由下方合成模型（旧比例）单独覆盖，防止该分支无人回归。
   const a = createLayoutModel(profile({ formFactor: 'unfolded' }));
-  const b = createLayoutModel(profile({ formFactor: 'tablet' })); // 占比不同 → move
+  const b = createLayoutModel(profile({ formFactor: 'tablet' })); // 比例统一 → 全 reuse
   const ops = reconcileLayout(a, b);
   const ids = ops.map((o) => o.nodeId).sort();
   assert.deepEqual(ids, ['canvas', 'statusBar', 'thumbZone'], '三段 id 恒定（跨重排不变）');
   assert.ok(ops.every((o) => o.kind === 'reuse' || o.kind === 'move'), '只产出 reuse / move，不 reset / 不移除');
-  assert.ok(ops.some((o) => o.kind === 'move'), 'formFactor 切换应产生 move');
+  assert.ok(ops.every((o) => o.kind === 'reuse'), '三形态比例统一后，形态切换全走 reuse（ADR-005）');
+
+  // move 分支仍须可用：用「旧比例」合成模型（手机 0.13/0.69/0.18）与现行模型对排
+  const legacy = {
+    formFactor: 'unfolded',
+    segments: {
+      statusBar: { id: 'statusBar', heightRatio: 0.13, minHeightDp: 48 },
+      canvas: { id: 'canvas', heightRatio: 0.69, minHeightDp: 240 },
+      thumbZone: { id: 'thumbZone', heightRatio: 0.18, minHeightDp: 64 },
+    },
+    safeArea: [44, 0, 34, 0] as readonly [number, number, number, number],
+    textScale: 100,
+    performanceTier: 'default' as const,
+    degraded: false,
+  };
+  const opsMove = reconcileLayout(legacy as never, a);
+  assert.ok(opsMove.every((o) => o.kind === 'reuse' || o.kind === 'move'), '只产出 reuse / move，不 reset / 不移除');
+  assert.ok(opsMove.some((o) => o.kind === 'move'), '比例有差异时应产生 move（分支未被删除）');
 });
 
 test('LAY-8 重排不触碰交互状态容器：选中 / 滚动跨重排保留', () => {

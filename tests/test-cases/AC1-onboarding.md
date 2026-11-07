@@ -328,7 +328,7 @@
 
 - E1 控件树中**唯一**主节奏按钮为文字「结束本日」+ 图标；不存在倍速控件、自动播放开关、倒计时条、独立暂停按钮、离线推进提示（UX-AC2 / §4.1「明确禁止」）。
 - E2 步骤 2 的检索命中数 = 0（字符串与控件树双重）。
-- E3 按钮热区 ≥ 44×44dp、相邻间距 ≥ 8dp；禁用态含锁形 / 灰且**不只靠颜色**区分（UX §4.1 / `design/accessibility/accessibility-matrix.md` §2.1）。
+- E3 按钮热区 ≥ 48×48dp、相邻间距 ≥ 8dp；禁用态含锁形 / 灰且**不只靠颜色**区分（UX §4.1 / `design/accessibility/accessibility-matrix.md` §2.1）。
 - E4 倍速 feature flag 默认关；代码中倍速仅作为「定时产生 V6 命令」的命令来源，双通道分层不变（ADR-004 §7 A6）。
 - E5 一次点按 = 一次 tick，`tickId` 恰好 +1（与 `TC-AC1-04` E2 一致）。
 
@@ -602,7 +602,7 @@
 | 归因可追溯、跨周期、只读、回退一致 | `tests/test-cases/AC2-attribution.md` |
 | ≥2 种达标方案、方案差异度、配置注入回放 | `tests/test-cases/AC3-no-dominant-strategy.md` |
 | AC4 计时口径完整论证、AC1/AC4 边界区分、慢 / 快受试者 | `tests/test-cases/AC4-session-length.md` §1 |
-| D-1~D-7 / G1~G12 检查表、S-01~S-12 用例索引、26 条 AC 门禁用例 | `tests/test-cases/dod-gates.md` |
+| D-1~D-7 / G1~G12 检查表、S-01~S-12 用例索引、29 条 AC 门禁用例 | `tests/test-cases/dod-gates.md` |
 | 逐行映射与覆盖缺口 | `tests/traceability-matrix.md` |
 | 观察记录 / 访谈 / 计时 / 缺陷 / 签字 | `tests/playtest-report-template.md` |
 

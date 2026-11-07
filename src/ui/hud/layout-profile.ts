@@ -41,15 +41,36 @@ const MIN_THUMB_DP = 64;
 const MIN_STATUS_DP = 48;
 const MIN_CANVAS_DP = 240;
 
-/** 三段高度占比（归一化；folded 把更多空间给画布，拇指区收窄但仍 ≥ 最小） */
+/**
+ * 三段高度占比（归一化，三形态统一 0.10 / 0.70 / 0.20）
+ * 依据：thumbZone ≥ 20% 满足《通用应用 UX 体验标准》2.1.3.4（等级必须）；
+ *        statusBar + thumbZone = 0.30 恰好满足 art-bible §2.4「UI 常驻覆盖率 ≤30%」。
+ *        （原手机 0.13/0.69/0.18 合计 0.31，已构成该条违规，S-12 一并修正。）
+ *        canvas ≥ 0.70 保证地图为主要可见面积。
+ *
+ * 最小高度保护（`MIN_*_DP`）与本比例**相互独立**，比例不吸收最小值——
+ * 二者在 `REFERENCE_HEIGHT_DP = 800`（见 `./a11y.ts`）下逐段校验：
+ * - statusBar 0.10 × 800 = 80dp ≥ MIN_STATUS_DP(48) ✓
+ * - thumbZone 0.20 × 800 = 160dp ≥ MIN_THUMB_DP(64) ✓
+ * - canvas    0.70 × 800 = 560dp ≥ MIN_CANVAS_DP(240) ✓
+ *
+ * 三形态当前取值一致（2026-11-07 用户裁定）。**分支结构刻意保留**：形态差异是
+ * 已知的将来变更点，删掉分支会让差异回来时重新引入「哪个形态走哪条」的推断成本。
+ */
+const UNIFIED_SEGMENT_RATIOS: Readonly<Record<HudSegmentId, number>> = Object.freeze({
+  statusBar: 0.1,
+  canvas: 0.7,
+  thumbZone: 0.2,
+});
+
 function segmentRatios(formFactor: FormFactor): Readonly<Record<HudSegmentId, number>> {
   if (formFactor === 'folded') {
-    return Object.freeze({ statusBar: 0.12, canvas: 0.7, thumbZone: 0.18 });
+    return UNIFIED_SEGMENT_RATIOS;
   }
   if (formFactor === 'tablet') {
-    return Object.freeze({ statusBar: 0.1, canvas: 0.78, thumbZone: 0.12 });
+    return UNIFIED_SEGMENT_RATIOS;
   }
-  return Object.freeze({ statusBar: 0.13, canvas: 0.69, thumbZone: 0.18 });
+  return UNIFIED_SEGMENT_RATIOS;
 }
 
 function buildSegments(formFactor: FormFactor): Readonly<Record<HudSegmentId, HudSegment>> {

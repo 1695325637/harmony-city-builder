@@ -1,7 +1,9 @@
 /**
  * HC-01 · S-08 · 可访问性断言单测（项 5 + 追加：低性能档位覆盖 / 减动效双通道）
  *
- * 钉定：热区 ≥44dp、间距 ≥8dp；文本缩放 100–200% 不截断/不重叠；减动效双通道
+ * 钉定：热区 ≥48dp（项目硬基线；华为《通用应用 UX 体验标准》2.1.3.3 48vp 推荐 / 40vp 必须，
+ * 本项目取推荐值，40vp 仅合规底线不得作为放宽依据）、间距 ≥8dp；
+ * 文本缩放 100–200% 不截断/不重叠；减动效双通道
  * （每个可交互控件必须有可读文字标签）；默认档与低性能档下核心控件均可达。
  */
 
@@ -21,8 +23,8 @@ import {
   type HudLayoutModel,
 } from '../../src/ui/hud/index.ts';
 
-test('A11Y-1 常量基线：热区 44dp、间距 8dp', () => {
-  assert.equal(MIN_TAP_TARGET_DP, 44);
+test('A11Y-1 常量基线：热区 48dp、间距 8dp', () => {
+  assert.equal(MIN_TAP_TARGET_DP, 48);
   assert.equal(MIN_SPACING_DP, 8);
 });
 
@@ -35,13 +37,19 @@ test('A11Y-2 可读标签判定：单字母/纯数字/纯符号不算，汉字�
   assert.equal(isReadableLabel('道路'), true);
 });
 
-test('A11Y-3 热区断言：<44dp 抛错', () => {
+test('A11Y-3 热区断言边界：47dp 抛错、48dp 通过（含等号）', () => {
+  // 边界对照：只改常量不钉边界，等于让 48 成为没人验证过的数字
   assert.throws(
-    () => assertTapTarget({ id: 'x', textLabel: '某', tapTargetDp: 40, labelIsTooltipOnly: false }),
+    () => assertTapTarget({ id: 'x', textLabel: '某', tapTargetDp: 47, labelIsTooltipOnly: false }),
     /热区/,
   );
   assert.doesNotThrow(() =>
     assertTapTarget({ id: 'x', textLabel: '某', tapTargetDp: 48, labelIsTooltipOnly: false }),
+  );
+  // 更小值仍必须抛错（防实现被改成 > 或整体放宽）
+  assert.throws(
+    () => assertTapTarget({ id: 'x', textLabel: '某', tapTargetDp: 40, labelIsTooltipOnly: false }),
+    /热区/,
   );
 });
 
