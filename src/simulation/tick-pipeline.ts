@@ -8,7 +8,9 @@
  * - 无墙上时钟、无原生随机、无平台 / 渲染 import、无 Map/Set 遍历顺序依赖；
  * - 所有中间量写进预分配 TickWorkspace，热路径不新建对象 / 数组（A9）；
  * - D6 单 tick 滞后：P4 不读本周期 I_t，P7 用 S_{t-1} 结算收入（§3.2.1）；
- * - P7 只标记 TARGET_MET / RETRY_AVAILABLE，无硬终局（OD-1 A）；
+ * - P7 只标记 TARGET_MET / RETRY_AVAILABLE，无硬终局（OD-1 A）；S-11 起达标帧真正解锁
+ *   `cells.unlocked`（边长阶梯 +2，不改 config.unlockedSide），`B < 0` 只发「预算吃紧」
+ *   告警（软着陆），不删档、不强制拆格、无硬终局；
  * - P3 服务覆盖复用 P2 通勤图产物，不另起静态距离分支（P3 否决项）。
  */
 
@@ -17,6 +19,8 @@ import {
   RULE_TO_STAGE,
   ZONE_ROAD_INDEX,
   DENSITY_MAX,
+  MAX_GRID_SIDE,
+  START_UNLOCKED_SIDE,
   type CityState,
   type Command,
   type SimEvent,
@@ -217,6 +221,63 @@ function addAttribution(
   ws.attribution.length = ws.attributionCount;
 }
 
+// ---------------------------------------------------------------------------
+// V9 兑（Claim）解锁：周期末达标 → 解锁下一块新区（S-11 验收 4 / GDD 02 §2）
+// ---------------------------------------------------------------------------
+
+/**
+ * 解锁粒度（**本批自定假设，GDD 02 未定义解锁形状；待设计侧钉定**）：
+ * 「解锁正方形边长阶梯 +2」——起始 16×16 → 18×18 → 20×20 → … → 32×32。
+ *
+ * 为什么用边长阶梯而不是 region 多值：`cells.region` 当前只有 0（起始区）/ 1（未解锁区）
+ * 二值语义（`src/core/schema.ts` 初始化即钉死），引第三值会改变既有 region 消费方语义；
+ * 边长阶梯只写 `cells.unlocked` / `cells.region` 的既有取值，形状确定、可断言、
+ * 不扩网格总边界、不动 `config.unlockedSide`（后者属 `configHash`，改动会触发 D-01 版本漂移）。
+ *
+ * 这是**结构常量**，不是平衡期数值；每次解锁面积由边长差自然决定，未引入任何新平衡参数。
+ * **待设计侧确认**：+2 是否合里程碑节奏 / 封顶是否需提示 / region 是否需多值。
+ */
+export const UNLOCK_STEP_SIDE = 2;
+
+/** 可达的最大里程碑数：起始 1 个 + (32 − 16) / 2 = 9（封顶后不再解锁） */
+export const MAX_UNLOCK_REGIONS = 1 + (MAX_GRID_SIDE - START_UNLOCKED_SIDE) / UNLOCK_STEP_SIDE;
+
+/** 第 `regions` 个里程碑对应的解锁正方形边长（钳到网格实际边长） */
+function unlockedSideFor(regions: number, side: number): number {
+  const v = START_UNLOCKED_SIDE + UNLOCK_STEP_SIDE * (regions - 1);
+  return v < side ? v : side;
+}
+
+/**
+ * 真正解锁下一块新区：把新一圈格 `cells.unlocked` 置 1、`cells.region` 归 0，
+ * 并同步 `cells.inputVersion++`（渲染层 `changeStamp` 靠它检出解锁，不得静默写格），
+ * 最后 `unlockedRegions++`。
+ *
+ * 纪律：
+ * - **不改 `config.unlockedSide`**（configHash 组成部分，禁改；D-01 版本头冻结）；
+ * - 不扩网格总边界（`cells.*` 数组长度恒为 `side × side`）；
+ * - 已达 32×32 上限返回 0，且不递增计数（避免「重复解锁」虚增）；
+ * - 无硬终局语义：本函数只在 `TARGET_MET` 分支调用，`RETRY_AVAILABLE` 分支绝不写格。
+ */
+function claimNextRegion(s: CityState): number {
+  const curSide = unlockedSideFor(s.unlockedRegions, s.side);
+  const nextSide = unlockedSideFor(s.unlockedRegions + 1, s.side);
+  if (nextSide <= curSide) return 0;
+  let added = 0;
+  for (let y = 0; y < nextSide; y++) {
+    for (let x = 0; x < nextSide; x++) {
+      const i = cellIndex(s.side, x, y);
+      if (s.cells.unlocked[i] !== 0) continue;
+      s.cells.unlocked[i] = 1;
+      s.cells.region[i] = 0;
+      s.cells.inputVersion[i]++;
+      added++;
+    }
+  }
+  if (added > 0) s.unlockedRegions++;
+  return added;
+}
+
 // --- 主结算事务 -------------------------------------------------------------
 
 export function runTick(
@@ -374,6 +435,9 @@ export function runTick(
   enterStage(ws, s, 'P6', 'issue placeholder; aggregate text refs only', newTickId, options);
 
   // ---- P7 周期判定与预算结算（R7）：仅周期末；使用 S_{t-1} ----
+  // 结算顺序固定（GDD 04 §6.1 E7）：先判定 → 再解锁 / 回退 → 最后提交快照（P8）。
+  // 本层只做「判定 + 解锁」，不触发任何回退；回退由 S-11 回退内核在独立路径执行，
+  // 且与解锁互斥（同一 tick 的 cycleOutcome 唯一：TARGET_MET 与 RETRY_AVAILABLE 不会同时成立）。
   let outcome: CycleOutcome = 'IN_CYCLE';
   if (s.cycleTickIndex + 1 >= config.K) {
     const SPrev = prev.S;
@@ -389,11 +453,23 @@ export function runTick(
     s.budget.I_f_lagged = s.budget.I_f_current;
     s.cycleId++;
     s.cycleTickIndex = 0;
+    // 周期判定：**满意度单轴**（GDD 04 §2.1 / S-11 验收 3），只由 cur.S 与 S_unlock 决定。
+    // RETRY_AVAILABLE 只是「可回退重试」标记，不删档、不锁城、无硬终局（OD-1 A / AC-F5）。
     outcome = cur.S >= config.S_unlock ? 'TARGET_MET' : 'RETRY_AVAILABLE';
-    if (outcome === 'TARGET_MET') s.unlockedRegions++;
+    // V9 兑：仅达标帧解锁（与 RETRY_AVAILABLE 分支互斥，不重复解锁）。
+    const claimedCells = outcome === 'TARGET_MET' ? claimNextRegion(s) : 0;
+    // 软着陆：B < 0 只告警、不进入硬终局（GDD 04 §3.3 / AC-E2）；收入下限 I_min 与 B 下限 B_floor
+    // 已在上方 Math.max / clamp 生效，绝不出现「破产锁死 / 强制拆格 / 乘性惩罚」。
+    const softLanding = s.budget.B < 0;
+    if (softLanding) {
+      emit(ws, 'IssuePlaceholder', newTickId, 'P7', '', 'BUDGET_TIGHT');
+    }
     addAttribution(ws, 'f_f', 0, '预算项', 'budget:I_t(S_prev=' + SPrev + ')', 'lagged income settlement', 'V4');
     addDelta(ws, 'B', s.budget.B - (I_t - C_b - C_m), s.budget.B);
-    enterStage(ws, s, 'P7', 'cycle settlement uses S_prev; ' + outcome, newTickId, options);
+    let p7Note = 'cycle settlement uses S_prev; ' + outcome;
+    if (claimedCells > 0) p7Note += '; claim+' + claimedCells + ' cells';
+    if (softLanding) p7Note += '; soft-landing B=' + s.budget.B;
+    enterStage(ws, s, 'P7', p7Note, newTickId, options);
   } else {
     s.cycleTickIndex++;
     s.budget.I_t = 0;

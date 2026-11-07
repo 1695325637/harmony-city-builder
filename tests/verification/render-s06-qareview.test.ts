@@ -5,16 +5,24 @@
  * 重点（与 engineering-lead 自证用例刻意不重叠的维度）：
  *   QA-R1/R2  changeStamp 契约真值比对：逐 tick 用「序列化快照」做真值，
  *             证明 diff 不漏检（真实变化 ⊆ diff）、无幽灵（diff ⊆ 版本戳变 ∪ 值变），
- *             并动态证明纯 ADVANCE tick 不写任何格（inputVersion 全数组不变）。
+ *             并动态证明**非解锁帧**的纯 ADVANCE tick 不写任何格（inputVersion 全数组不变）。
+ *             ⚠️ T-145 升级：S-06 时期本条前提是「任意纯 ADVANCE tick」；S-11（T-144）起
+ *             `TARGET_MET` 帧会真正写 `cells.unlocked` / `cells.region`，故前提按 Story 语义
+ *             **收紧为「恒未达标的非解锁帧」**（`S_unlock=101`），原断言强度不变。
  *   QA-R3     全 src/ 写格路径静态审计：除 schema 初始化外，写 cells 数组只允许
- *             tick-pipeline P1 的 zone/density 两处，且同块必须有 inputVersion bump。
+ *             tick-pipeline 的 P1（zone/density）与 P7 解锁（unlocked/region）四处，
+ *             且**每一处**写值后同块必须有 inputVersion bump（T-145 由「只查 P1」升级为「逐写检查」）。
  *   QA-R4     渲染层静态重扫（含其 VM-8 禁用清单未覆盖的绕过面：.set/.fill/
  *             Object.assign/动态 import/颜色函数/0x 色值/模板拼色/../simulation）。
  *   QA-R5     预览页诚实文案：横幅「非最终美术 / 未验证」存在，且无「已通过」类断言。
  *   QA-R6     四条验收独立抽样（三档批次集合、未激活分区不预载、格式降级链含 opaque 分支）。
  *   QA-R7     绘制列表与图集清单一致性（atlasId 必须可解析、批次数 = 估算 DrawCall）。
- *   QA-R8     P7 周期解锁不写格（当前范围：仅 unlockedRegions 计数，格解锁留 S-11），
- *             确保「不会出现不 bump 的写路径」这一前提在多次达标周期后仍成立。
+ *   QA-R8     「不 bump 的写格路径」审计的行为侧：按帧分支断言——
+ *             **解锁帧**（TARGET_MET）必须写格、写格集合 === bump 集合、diff 非空；
+ *             **非解锁帧**（RETRY_AVAILABLE）cells 逐字节不变、diff 为空。
+ *             ⚠️ T-145 升级：S-06 时期本条是「解锁只递增计数、不写格（格解锁留 S-11）」的占位契约；
+ *             S-11 正是补该缺口，故判据随 Story 演进为「达标帧必须写格且必须 bump」，
+ *             并保留 `unlockCount>=3` 控制组证明确实发生多次解锁（判定强度不降反升）。
  *
  * 纪律：本文件只读 src/ 与 preview/，不写权威状态、不改实现；
  *   失败不删用例；不编造数值；DrawCall 一律「估算」措辞。
@@ -166,8 +174,13 @@ test('QA-R1 diffViewModel 与序列化真值逐 tick 比对：真实变化 ⊆ d
   }
 });
 
-test('QA-R2 纯 ADVANCE tick 不写任何格：inputVersion 全数组逐字节不变 + diff 为空', () => {
-  const config = createDefaultConfig();
+test('QA-R2 非解锁帧纯 ADVANCE tick 不写任何格：inputVersion 全数组逐字节不变 + diff 为空', () => {
+  // T-145 升级依据：S-11 验收 4 / GDD 02 §2 —— TARGET_MET 帧起真正写 cells.unlocked / cells.region。
+  // 因此把 S-06 时期的「任意纯 ADVANCE tick」前提收紧为「**恒未达标的非解锁帧**」：
+  // S_unlock=101（满意度上界 100，永不达标）→ 8 个 tick 全部走 RETRY_AVAILABLE 分支。
+  // 判定强度与升级前相同（inputVersion 全数组逐字节 + 无值变 + diff 为空），
+  // 并新增前提自检（S < 101 且 unlockedRegions 不变），防止前提日后被悄悄改回而成空转。
+  const config = createDefaultConfig({ S_unlock: 101 });
   const state = createInitialState(config);
   paintDemo(state, config);
   const ws = createTickWorkspace(config, state.side);
@@ -178,6 +191,10 @@ test('QA-R2 纯 ADVANCE tick 不写任何格：inputVersion 全数组逐字节�
     const beforeVM = buildViewModel(cur);
     const r = runTick(cur, [makeCommand.advance('r2-a' + t, 1)], config, ws);
     const afterSnap = snap(r.state);
+    // 前提自检：确实是非解锁帧（否则下面的「不写格」断言失去意义）
+    assert.ok(r.state.frames.current.S < config.S_unlock,
+      'tick ' + t + '：前提 S=' + r.state.frames.current.S + ' 必须 < S_unlock=' + config.S_unlock);
+    assert.equal(r.state.unlockedRegions, state.unlockedRegions, 'tick ' + t + '：前提 非解锁帧，unlockedRegions 不得变化');
     assert.deepEqual(
       Array.from(afterSnap.cells.inputVersion),
       Array.from(beforeSnap.cells.inputVersion),
@@ -193,7 +210,7 @@ test('QA-R2 纯 ADVANCE tick 不写任何格：inputVersion 全数组逐字节�
 // QA-R3 全 src/ 写格路径静态审计（契约的静态前提）
 // ---------------------------------------------------------------------------
 
-test('QA-R3 全 src/ 写 cells 数组仅 schema 初始化 + tick-pipeline P1 两处，且 P1 同块必 bump', () => {
+test('QA-R3 全 src/ 写 cells 数组仅 schema 初始化 + tick-pipeline P1/P7 四处，且每一处写值后同块必 bump', () => {
   const files = srcFiles('src');
   const writeRe = /cells\.(zone|density|unlocked|region)\s*\[[^\]]*\]\s*=(?!=)/g;
   const hits: { file: string; field: string }[] = [];
@@ -212,18 +229,45 @@ test('QA-R3 全 src/ 写 cells 数组仅 schema 初始化 + tick-pipeline P1 两
   }
   // schema.ts 仅为 createInitialState 的 4 处初始化（unlocked/region/zone/density）
   assert.deepEqual(byFile.get('/src/core/schema.ts'), ['unlocked', 'region', 'zone', 'density'], '初始化写入仅 4 处');
-  // tick-pipeline.ts 仅 P1 的 zone/density 两处
-  assert.deepEqual(byFile.get('/src/simulation/tick-pipeline.ts'), ['zone', 'density'], '结算链仅 P1 写值，不得有 P7 解锁写格等未 bump 路径');
-  assert.equal(hits.length, 6, '全库写格语句共 6 条（4 初始化 + 2 P1），新增写路径必须同步审计');
+  // T-145 升级（依据 S-11 验收 4 / GDD 02 §2）：tick-pipeline 现有两处写格段
+  //   P1 命令写入：zone / density（同块 bump）
+  //   P7 达标解锁：unlocked / region（同块 bump）—— S-11 前此处为「不写格」，现为硬契约
+  // 按字段排序比对（不依赖文件内出现顺序），并逐字段断言出现次数，避免「多写一处同名字段」漏审。
+  const pipeFields = (byFile.get('/src/simulation/tick-pipeline.ts') ?? []).slice().sort();
+  assert.deepEqual(pipeFields, ['density', 'region', 'unlocked', 'zone'], '结算链写格仅 P1（zone/density）+ P7（unlocked/region）');
+  assert.equal(hits.length, 8, '全库写格语句共 8 条（4 初始化 + 2 P1 + 2 P7 解锁），新增写路径必须同步审计');
 
-  // P1 断言块必须无条件 bump：zone/density 写入后同段出现 inputVersion++
+  // 逐字段计数：任何字段多写一次都会红（比只比数组长度更严）
+  const countOf = (list: string[] | undefined, f: string): number =>
+    (list ?? []).filter((x) => x === f).length;
+  assert.equal(countOf(byFile.get('/src/core/schema.ts'), 'unlocked'), 1);
+  assert.equal(countOf(byFile.get('/src/core/schema.ts'), 'region'), 1);
+  assert.equal(countOf(byFile.get('/src/simulation/tick-pipeline.ts'), 'unlocked'), 1);
+  assert.equal(countOf(byFile.get('/src/simulation/tick-pipeline.ts'), 'region'), 1);
+
   const pipe = stripNonCode(readFileSync(join(process.cwd(), 'src/simulation/tick-pipeline.ts'), 'utf8'));
-  assert.equal((pipe.match(/cells\.inputVersion\[[^\]]*\]\+\+/g) ?? []).length, 1, 'P1 恰有一处 bump');
-  const bumpIdx = pipe.search(/cells\.inputVersion\[/);
-  const zoneIdx = pipe.search(/cells\.zone\[/);
-  const densIdx = pipe.search(/cells\.density\[/);
-  assert.ok(bumpIdx > zoneIdx && bumpIdx > densIdx, 'bump 紧随 zone/density 写入（同块、无分支跳过）');
-  assert.ok(bumpIdx - densIdx < 200, 'bump 与写入距离很短（避免被条件分支隔开）');
+  // 全局：恰两处 bump（P1 一处 + P7 解锁一处）
+  assert.equal((pipe.match(/cells\.inputVersion\[[^\]]*\]\+\+/g) ?? []).length, 2, 'P1 与 P7 解锁各一处 bump');
+
+  // T-145 新增正向约束（比升级前更严）：**每一处** cells 写值之后 200 字符内必须出现 inputVersion bump。
+  // 升级前只校验「bump 在 zone/density 之后且距离短」，无法发现「新加的写格忘了 bump」。
+  const perWriteRe = /cells\.(zone|density|unlocked|region)\s*\[[^\]]*\]\s*=(?!=)/g;
+  let w: RegExpExecArray | null;
+  let checked = 0;
+  while ((w = perWriteRe.exec(pipe)) !== null) {
+    checked++;
+    const bump = pipe.indexOf('cells.inputVersion[', w.index);
+    assert.ok(bump > w.index, '写 cells.' + w[1] + ' 之后必须存在 inputVersion bump（防忘 bump）');
+    assert.ok(bump - w.index < 200, '写 cells.' + w[1] + ' 与 bump 距离必须很短（避免被条件分支隔开）');
+  }
+  assert.equal(checked, 4, '本文件应有 4 处写值（P1 两处 + P7 两处），实得 ' + checked);
+
+  // 升级前的原始定位断言是「全局第一个 bump 必须晚于 zone/density」，该写法在 P7 解锁
+  // （文件内位置在 P1 之前）出现后**已不成立且已失去意义**：它只能表达"全库只有一个 bump"。
+  // 上面「每一处写值后 200 字符内必须有 bump」的逐写检查**严格强于**它（覆盖 P1 与 P7 两段），
+  // 故此处显式记录替换关系，不留空断言、也不保留恒假断言。
+  assert.ok(pipe.indexOf('cells.inputVersion[') > pipe.indexOf('cells.unlocked['),
+    'P7 解锁段：bump 出现在写格之后（其余耦合由上面的逐写检查覆盖）');
 });
 
 // ---------------------------------------------------------------------------
@@ -361,35 +405,83 @@ test('QA-R7 绘制列表一致性：atlasId 全部可解析、批次数 = 估算
 // QA-R8 多次达标周期后仍无「不 bump 的写格路径」
 // ---------------------------------------------------------------------------
 
-test('QA-R8 周期达标（含解锁）不写格：unlockedRegions 递增但 cells.unlocked/region 逐字节不变', () => {
+test('QA-R8 解锁帧必写格且写格集合 === bump 集合 / 非解锁帧零写格（S-11 起判据升级）', () => {
+  // T-145 升级依据：S-11 验收 4 + GDD 02 §2/§3.1 —— 达标帧（TARGET_MET）起真正解锁：
+  // cells.unlocked 置 1、cells.region 归 0、并 bump inputVersion（边长阶梯 +2，不扩网格、不改 config.unlockedSide）。
+  // S-06 时期本条是「解锁只递增 unlockedRegions、不写格（格解锁留 S-11）」的**占位契约**，
+  // S-11 正是补该缺口，故判据按 Story 语义升级为按帧分支断言；**判定强度不降反升**：
+  //   - 解锁帧：写格集合必须非空、且**恰好等于** bump 集合（写格必 bump、未写格不 bump）、diff 必须检出每一个写过的格
+  //   - 非解锁帧：cells 全字段逐字节不变 + diff 为空（原「不写格」契约在 RETRY 分支继续有效）
+  // 另加不扩网格 / 可用面积确实变大 / 双向控制组（解锁>=3 且 非解锁>=3），防「只跑一半分支」的空转。
   const config = createDefaultConfig({ K: 2, S_unlock: 0 }); // 达标即解锁，最多路径覆盖
   const state = createInitialState(config);
   paintDemo(state, config);
   const ws = createTickWorkspace(config, state.side);
   const before = snap(state);
+  const beforeCellCount = state.cells.zone.length;
   let cur = state;
   let unlockCount = 0;
+  let nonUnlockCount = 0;
+
+  /** 本帧发生「写格」的格索引（四个可写字段任一值变化） */
+  const wroteIndices = (b: Snap, a: Snap): number[] => {
+    const out: number[] = [];
+    for (let i = 0; i < a.cells.zone.length; i++) {
+      if (
+        b.cells.zone[i] !== a.cells.zone[i]
+        || b.cells.density[i] !== a.cells.density[i]
+        || b.cells.unlocked[i] !== a.cells.unlocked[i]
+        || b.cells.region[i] !== a.cells.region[i]
+      ) out.push(i);
+    }
+    return out;
+  };
+
   for (let t = 1; t <= 6; t++) {
     const prevVM = buildViewModel(cur);
     const beforeTick = snap(cur);
     const r = runTick(cur, [makeCommand.advance('r8-a' + t, 1)], config, ws);
     const afterTick = snap(r.state);
-    if (afterTick.unlockedRegions > beforeTick.unlockedRegions) unlockCount++;
-    assert.deepEqual(
-      afterTick.cells.unlocked,
-      beforeTick.cells.unlocked,
-      'tick ' + t + '：当前实现解锁只递增 unlockedRegions 计数，不得写 cells.unlocked（若将来实现解锁，必须同步 bump 版本戳）',
-    );
-    assert.deepEqual(afterTick.cells.region, beforeTick.cells.region, 'tick ' + t + '：region 不得被结算写');
-    assert.deepEqual(diffViewModel(prevVM, buildViewModel(r.state)), [], 'tick ' + t + '：无格变化时 diff 必须为空');
+    const wrote = wroteIndices(beforeTick, afterTick);
+    const bumped = versionChangedIndices(beforeTick, afterTick);
+    const isUnlockFrame = afterTick.unlockedRegions > beforeTick.unlockedRegions;
+
+    if (isUnlockFrame) {
+      unlockCount++;
+      assert.ok(wrote.length > 0, 'tick ' + t + '：解锁帧必须有格变化（否则解锁是空转）');
+      assert.deepEqual(bumped, wrote,
+        'tick ' + t + '：写格集合与 bump 集合必须完全相同（写格必 bump、未写格不得 bump）');
+      const diff = diffViewModel(prevVM, buildViewModel(r.state));
+      assert.notDeepEqual(diff, [], 'tick ' + t + '：解锁必须被 diff 检出（否则渲染层永远看不到新地块）');
+      for (const i of wrote) {
+        assert.ok(diff.indexOf(i) >= 0, 'tick ' + t + '：写过的格 ' + i + ' 必须出现在 diff 中');
+      }
+    } else {
+      nonUnlockCount++;
+      assert.deepEqual(afterTick.cells, beforeTick.cells,
+        'tick ' + t + '：非解锁帧零写格（cells 全字段逐字节不变）');
+      assert.deepEqual(bumped, [], 'tick ' + t + '：非解锁帧不得有任何 bump');
+      assert.deepEqual(diffViewModel(prevVM, buildViewModel(r.state)), [], 'tick ' + t + '：非解锁帧 diff 必须为空');
+    }
     cur = r.state;
   }
+
+  // 双向控制组：两个分支都必须真实跑到
   assert.ok(unlockCount >= 3, '6 tick / K=2 应至少 3 次周期达标解锁（实际 ' + unlockCount + '）');
-  assert.ok(cur.unlockedRegions > before.unlockedRegions, 'unlockedRegions 计数确实递增');
-  // 全量指纹比对：cells 全字段未变（只允许 unlockedRegions 等标量变化）
+  assert.ok(nonUnlockCount >= 3, '6 tick / K=2 应至少 3 个非解锁帧（实际 ' + nonUnlockCount + '）');
+
   const after = snap(cur);
-  assert.deepEqual(after.cells, before.cells, '6 tick 后 cells 全字段逐字节不变');
-  // 对照：标量确实变了，保证本用例不是空转
-  assert.notEqual(after.unlockedRegions, before.unlockedRegions);
+  assert.ok(after.unlockedRegions > before.unlockedRegions, 'unlockedRegions 计数确实递增');
+  // 不扩网格：cells 数组长度恒为 side × side（解锁只改值，不扩边界）
+  assert.equal(after.cells.zone.length, beforeCellCount, 'cells.zone 长度不变');
+  assert.equal(after.cells.unlocked.length, beforeCellCount, 'cells.unlocked 长度不变');
+  assert.equal(after.cells.region.length, beforeCellCount, 'cells.region 长度不变');
+  // 可用面积确实变大 / 未解锁标记确实减少（防「写了但写反」）
+  const ones = (arr: number[]): number => arr.filter((v) => v === 1).length;
+  assert.ok(ones(after.cells.unlocked) > ones(before.cells.unlocked),
+    '解锁后 unlocked=1 的格数必须增多（实际 ' + ones(before.cells.unlocked) + ' → ' + ones(after.cells.unlocked) + '）');
+  assert.ok(ones(after.cells.region) < ones(before.cells.region),
+    '解锁后 region=1（未解锁标记）的格数必须减少');
+  // 对照：会话状态整体确实推进（控制组）
   assert.notEqual(canonicalize(cur), canonicalize(state), '会话状态整体确实推进（控制组）');
 });

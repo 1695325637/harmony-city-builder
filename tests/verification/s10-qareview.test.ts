@@ -576,7 +576,7 @@ test('QAS-18 验收5 · H3 仅能力位签名：flag 冻结 false、remote 恒 u
   }
 });
 
-test('QAS-19 README 声明的 src 行数与磁盘逐项一致（含 §2.3 存档层四项）', () => {
+test('QAS-19 README 声明的 src 行数与磁盘逐项一致 + barrel 出口集合受控', () => {
   const md = read('src/README.md');
   const rows: Array<{ path: string; declared: number }> = [];
   const re = /^\|\s*`(src\/[^`]+)`\s*\|\s*(\d+)\s*\|/gm;
@@ -593,9 +593,42 @@ test('QAS-19 README 声明的 src 行数与磁盘逐项一致（含 §2.3 存档
   for (const p of ['src/save/types.ts', 'src/save/storage.ts', 'src/save/save-service.ts', 'src/save/index.ts']) {
     assert.equal(seen.includes(p), true, '§2.3 必须声明 ' + p);
   }
-  // §2 的 src/index.ts = 28（+1 export 来自 save）
-  assert.equal(lineCount('src/index.ts'), 28);
-  assert.equal(read('src/index.ts').includes("export * from './save/index.ts'"), true);
+
+  // T-145 升级：原断言把 src/index.ts 行数硬编码为 28，S-11（T-143）补 rollback 出口后变 29 → 误红。
+  // 硬编码行数只是"另一个数字要同步"，并不真正约束导出面；改为两条更强的断言：
+  //   ① 行数由 README 声明、并与磁盘动态比对（上面的循环已覆盖 src/index.ts，这里显式再钉一次）
+  //   ② **barrel 出口集合受控**：增删任何一个出口都必须在此登记（比行数更硬，且不受注释/空行影响）
+  const declaredIndex = rows.find((r) => r.path === 'src/index.ts');
+  assert.ok(declaredIndex !== undefined, 'README §2 必须声明 src/index.ts 行数');
+  assert.equal(lineCount('src/index.ts'), declaredIndex.declared, 'src/index.ts 声明行数与磁盘一致');
+
+  const EXPECTED_BARREL_EXPORTS = [
+    './core/types.ts',
+    './core/config.ts',
+    './core/schema.ts',
+    './simulation/commands.ts',
+    './simulation/snapshot.ts',
+    './simulation/traffic.ts',
+    './simulation/tick-pipeline.ts',
+    './simulation/session.ts',
+    './simulation/rollback.ts',
+    './save/index.ts',
+    './render/iso.ts',
+    './render/view-model.ts',
+    './render/semantic-tokens.ts',
+    './render/atlas.ts',
+    './render/asset-naming.ts',
+    './render/texture-format.ts',
+    './render/draw-list.ts',
+    './render/flow-legend.ts',
+    './render/backend.ts',
+    './render/cocos/cocos-backend.ts',
+  ];
+  const actualExports = Array.from(
+    read('src/index.ts').matchAll(/^export \* from '([^']+)';$/gm),
+  ).map((mm) => mm[1]);
+  assert.deepEqual(actualExports, EXPECTED_BARREL_EXPORTS,
+    '统一出口集合受控：新增 / 删除 / 改写任一 export 都必须同步本清单（S-11 起含 simulation/rollback.ts）');
 });
 
 test('QAS-20 诚实话语：文档中"真机 / 断点续玩 / 达标"字样无一处构成正面声称', () => {

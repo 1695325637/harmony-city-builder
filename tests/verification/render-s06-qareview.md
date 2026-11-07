@@ -47,6 +47,7 @@
 | 写格路径穷举 | 全 `src/` 去注释去字符串后扫描 `cells.(zone\|density\|unlocked\|region)[...] =` | **共 6 条**：`schema.ts` L103~106 初始化 4 条（unlocked/region/zone/density）+ `tick-pipeline.ts` L279~280 的 zone/density **2 条**。全库无第三处写格（QA-R3 断言命中序列，新增写路径即红） |
 | bump 是否无条件 | 同段审计 `tick-pipeline.ts` P1 | L279~281 为**同一无分支语句组**：`zone[idx]=z; density[idx]=density; inputVersion[idx]++`；全文件 `inputVersion[..]++` 恰 1 处（QA-R3 断言「bump 紧随写入、距离 <200 字符」，防止未来被 `if` 隔开） |
 | 是否存在其它不 bump 写路径 | P7 周期解锁是否写 `cells.unlocked/region`？ | **不写**：`tick-pipeline.ts` L383 仅 `s.unlockedRegions++`（计数），格解锁尚未实现（留 S-11）。QA-R8 用 `K=2 / S_unlock=0` 跑 6 tick、3 次达标，断言 `cells.unlocked/region` 逐字节不变（若将来实现格解锁而忘 bump，该用例立即红） |
+| **↑ S-11 落地后（T-145 增补）** | 该行是 **S-06 时期的占位契约**，原文保留备查 | **前提已被 S-11 取代**：T-144 起 `TARGET_MET` 帧真正写 `cells.unlocked=1` / `cells.region=0` 并 bump `inputVersion`（边长阶梯 +2）。判据按 Story 语义升级（**不放宽**）：QA-R2 收紧为「非解锁帧」；QA-R3 扩到 4 字段 / 8 条写入、且**每一处**写值后 200 字符内必须有 bump；QA-R8 改为按帧分支（解锁帧：写格集合 === bump 集合、diff 必须检出；非解锁帧：cells 全字段逐字节不变）。详见 `tests/verification/s11-qareview.md` §3 |
 | 结算链其它阶段是否偷写格 | 纯 ADVANCE tick 后 `inputVersion` 全数组比对 | **逐字节不变**（QA-R2，8 连 tick）——动态证明 P2~P8 无写格 |
 | diff 是否漏检 / 幽灵 | 逐 tick 以「序列化快照」为真值比对 `diffViewModel` | **真实变化 ⊆ diff ⊆（版本戳变 ∪ 值变）**，6 tick 混合命令（zone / density / road / 同值重写 / 纯 advance）全部成立（QA-R1）；同值重写允许出现（版本变）但不产生幽灵 |
 

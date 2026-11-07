@@ -30,15 +30,16 @@
 | `src/simulation/commands.ts` | 90 | `makeCommand`、`CommandQueue`（幂等键）、`InputGate` |
 | `src/simulation/traffic.ts` | 365 | 最小可注入通勤求解：连通块合并（B ≤ 64）+ ROAD 图 BFS + 拥堵单调 + 不可达 / 除零兜底；**T-133 `FlowStateEnum` / `classifyFlowState`（§4 钳制后逐边 q/cap 分档，纯函数）+ `TrafficResult.flowState`（与 qOverCap 同长、逐边对齐）**；**T-137 `NO_EDGE_CELL`(-1) + `TrafficResult.edgeCells`（逐边真实落点格 = R 连通块代表格，与 flowState / qOverCap 同长；未写入边槽为哨兵；纯视觉派生量，不进 AC-T8 ④ 计分链）** |
 | `src/simulation/snapshot.ts` | 258 | **T-116 最小内存实现**：`buildTickSnapshot` + `createInMemorySnapshotStore`（Keyframe/Delta 规则、冷归档恢复走 `deserializeState`、D-01 联动；介质为内存模拟，持久化留 S-05/S-09）；**T-133 `TickSnapshot.flowState` 标 `pending:S-05`（纯视觉派生，渲染层下发图例即可，不进冷归档）** |
-| `src/simulation/tick-pipeline.ts` | 454 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）**；**T-137 `TickResult.edgeCells` 透传 `TrafficResult.edgeCells`（逐边落点，纯视觉派生）** |
-| `src/simulation/session.ts` | 100 | 编排层 `createSimulation`：仅 `advanceDay`（V6）触发结算，连点幂等，结算中 gate 锁定；**T-116：入口 `assertConfigCompatible`（D-01 修复点 2）** |
-| `src/index.ts` | 28 | 统一导出（T-135 增 `render/flow-legend.ts` 出口；**T-140 增 `save/index.ts` 出口**） |
+| `src/simulation/tick-pipeline.ts` | 530 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）**；**T-137 `TickResult.edgeCells` 透传 `TrafficResult.edgeCells`（逐边落点，纯视觉派生）**；**T-144 / S-11：P7 周期末仅按满意度单轴判定（`cur.S >= config.S_unlock`），TARGET_MET 帧真正把 `cells.unlocked` / `cells.region` 写为解锁（边长阶梯 +2，`cells` 数组长度不变、不改 `config.unlockedSide`）并 bump `inputVersion`，`B < 0` 发 `IssuePlaceholder` / `BUDGET_TIGHT` 软着陆告警；无硬终局** |
+| `src/simulation/session.ts` | 179 | 编排层 `createSimulation`：仅 `advanceDay`（V6）触发结算，连点幂等，结算中 gate 锁定；**T-116：入口 `assertConfigCompatible`（D-01 修复点 2）**；**T-143：可选 `SimulationOptions.snapshotStore`（提供后每次成功结算归档一条快照）+ `retryCycle(targetCycleId?)` 委托回退内核（同目标周期幂等重放）+ `lastCycleOutcome`（E7 互斥判据）；未注入介质时行为与旧版逐字节一致** |
+| `src/simulation/rollback.ts` | 283 | **T-143 回退内核（S-11 验收 1/2）**：`findCycleStartKeyframe`（`cycleTickIndex === 0` 且 `cycleId` 匹配的自包含 KEYFRAME，缺失显式失败）/ `retryCycle`（**只 `restore` 反序列化、无逆运算**；头部 `tickId` 取已用最大 + 1、`cycleId` 取高水位 + 1，单调不复用不倒退；新分支起点以 KEYFRAME 入档，旧分支一条不删）/ `assertRollbackAllowed`（E7：`TARGET_MET` 帧拒绝回退）/ `RollbackError` 可判定错误码 |
+| `src/index.ts` | 29 | 统一导出（T-135 增 `render/flow-legend.ts` 出口；**T-140 增 `save/index.ts` 出口**；**T-143 增 `simulation/rollback.ts` 出口，使 tsc src-only 口径覆盖回退内核**） |
 | `tests/unit/*.test.ts` | — | 单元用例（按模块分组：core / simulation / render / ui / diagnosis / save / idempotency 等）。**不声明固定行数**：用例随批次增长，历史声明值 869 已漂移至数千行（T-142 发现），改以「见 `tests/` 实际文件」为准，避免每次加用例都要同步 |
 | `tests/verification/*.test.ts` | — | 验证 / 独立复核用例（`edge-cases` / `cold-archive-s05` / `perf-s04` / `render-s06-*` / `ui-s07-*` / `s10-qareview` 等）。**同样不声明固定行数**，理由同上 |
 
 > **行数声明纪律**：`src/**` 各行数仍逐文件声明并由门禁守卫（`QAS-19` 动态解析、`QA-T8` 抽查 6 个 render 模块）；`tests/**` 不再声明行数（只受真实运行约束）。
 
-> 追加的同类文件：`src/simulation/session.ts`（编排层，主理人允许「按需增补同类文件」）。**未创建任何工程配置文件。**
+> 追加的同类文件：`src/simulation/session.ts`（编排层）、`src/simulation/rollback.ts`（回退内核，T-143；主理人允许「按需增补同类文件」）。**未创建任何工程配置文件。**
 
 ### 2.1 渲染层索引（S-06 / T-118 落地 + T-121 修复批）
 
