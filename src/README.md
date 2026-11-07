@@ -33,8 +33,10 @@
 | `src/simulation/tick-pipeline.ts` | 454 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）**；**T-137 `TickResult.edgeCells` 透传 `TrafficResult.edgeCells`（逐边落点，纯视觉派生）** |
 | `src/simulation/session.ts` | 100 | 编排层 `createSimulation`：仅 `advanceDay`（V6）触发结算，连点幂等，结算中 gate 锁定；**T-116：入口 `assertConfigCompatible`（D-01 修复点 2）** |
 | `src/index.ts` | 28 | 统一导出（T-135 增 `render/flow-legend.ts` 出口；**T-140 增 `save/index.ts` 出口**） |
-| `tests/unit/*.test.ts` | 869 | 8 个测试文件 / 51 条断言用例（7 文件 45 条基线 + `d01-config-compat.test.ts` 6 条 D-01 回归，见 §4） |
-| `tests/verification/*.test.ts` | 1238 | `edge-cases.test.ts`（quality-lead T-114，12 条；T-116 仅 V-06/V-STATIC 按修复后契约改写）+ `cold-archive-s05.test.ts`（6 条）+ `perf-s04.test.ts`（3 条） |
+| `tests/unit/*.test.ts` | — | 单元用例（按模块分组：core / simulation / render / ui / diagnosis / save / idempotency 等）。**不声明固定行数**：用例随批次增长，历史声明值 869 已漂移至数千行（T-142 发现），改以「见 `tests/` 实际文件」为准，避免每次加用例都要同步 |
+| `tests/verification/*.test.ts` | — | 验证 / 独立复核用例（`edge-cases` / `cold-archive-s05` / `perf-s04` / `render-s06-*` / `ui-s07-*` / `s10-qareview` 等）。**同样不声明固定行数**，理由同上 |
+
+> **行数声明纪律**：`src/**` 各行数仍逐文件声明并由门禁守卫（`QAS-19` 动态解析、`QA-T8` 抽查 6 个 render 模块）；`tests/**` 不再声明行数（只受真实运行约束）。
 
 > 追加的同类文件：`src/simulation/session.ts`（编排层，主理人允许「按需增补同类文件」）。**未创建任何工程配置文件。**
 
@@ -128,6 +130,12 @@
   权限声明无后台保活 / 精确闹钟 / 离线任务，存档不含参与模拟计算的墙上时钟。
 - 用例：`tests/unit/save-service.test.ts`（SV-1~12）/ `save-slots.test.ts`（SL-1~10）/
   `save-migration.test.ts`（MG-1~10），逐条对应 SM-W4-01/02/03 与 S-10 验收 1~5。
+- **依赖口径（T-142 N-02 澄清）**：`src/save/types.ts` / `save-service.ts` 对
+  `src/simulation/snapshot.ts` 只有**类型级依赖**（`import type { StoredSnapshot }`），
+  类型剥离后运行期零加载、零结算调用；S-10「不得引用 `src/simulation/*`」的约束
+  指的是**不得引用其运行期行为**（`runTick` / `solveTraffic` / `advanceDay` /
+  `createSimulation` / `computeBaselineS` / `aggregate`），**只读类型的类型级依赖不受限**。
+  MG-9 静态证据按此口径判定。
 
 ---
 
