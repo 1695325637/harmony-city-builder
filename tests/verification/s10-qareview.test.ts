@@ -621,6 +621,7 @@ test('QAS-19 README 声明的 src 行数与磁盘逐项一致 + barrel 出口集
     './render/texture-format.ts',
     './render/draw-list.ts',
     './render/flow-legend.ts',
+    './render/degradation-plan.ts',
     './render/backend.ts',
     './render/cocos/cocos-backend.ts',
   ];

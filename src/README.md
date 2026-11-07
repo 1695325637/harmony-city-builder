@@ -33,7 +33,7 @@
 | `src/simulation/tick-pipeline.ts` | 530 | `TickWorkspace`（预分配）、`runTick` P0~P8、双帧、D6 解环、零热路径分配、`advanceRenderFrames`；**T-133 `TickResult.flowState` 透传 `TrafficResult.flowState`（供 UI / 渲染消费）**；**T-137 `TickResult.edgeCells` 透传 `TrafficResult.edgeCells`（逐边落点，纯视觉派生）**；**T-144 / S-11：P7 周期末仅按满意度单轴判定（`cur.S >= config.S_unlock`），TARGET_MET 帧真正把 `cells.unlocked` / `cells.region` 写为解锁（边长阶梯 +2，`cells` 数组长度不变、不改 `config.unlockedSide`）并 bump `inputVersion`，`B < 0` 发 `IssuePlaceholder` / `BUDGET_TIGHT` 软着陆告警；无硬终局** |
 | `src/simulation/session.ts` | 179 | 编排层 `createSimulation`：仅 `advanceDay`（V6）触发结算，连点幂等，结算中 gate 锁定；**T-116：入口 `assertConfigCompatible`（D-01 修复点 2）**；**T-143：可选 `SimulationOptions.snapshotStore`（提供后每次成功结算归档一条快照）+ `retryCycle(targetCycleId?)` 委托回退内核（同目标周期幂等重放）+ `lastCycleOutcome`（E7 互斥判据）；未注入介质时行为与旧版逐字节一致** |
 | `src/simulation/rollback.ts` | 283 | **T-143 回退内核（S-11 验收 1/2）**：`findCycleStartKeyframe`（`cycleTickIndex === 0` 且 `cycleId` 匹配的自包含 KEYFRAME，缺失显式失败）/ `retryCycle`（**只 `restore` 反序列化、无逆运算**；头部 `tickId` 取已用最大 + 1、`cycleId` 取高水位 + 1，单调不复用不倒退；新分支起点以 KEYFRAME 入档，旧分支一条不删）/ `assertRollbackAllowed`（E7：`TARGET_MET` 帧拒绝回退）/ `RollbackError` 可判定错误码 |
-| `src/index.ts` | 29 | 统一导出（T-135 增 `render/flow-legend.ts` 出口；**T-140 增 `save/index.ts` 出口**；**T-143 增 `simulation/rollback.ts` 出口，使 tsc src-only 口径覆盖回退内核**） |
+| `src/index.ts` | 30 | 统一导出（T-135 增 `render/flow-legend.ts` 出口；**T-140 增 `save/index.ts` 出口**；**T-143 增 `simulation/rollback.ts` 出口，使 tsc src-only 口径覆盖回退内核**；**S-12 增 `render/degradation-plan.ts` 出口，使 §10.4 降级顺序契约纳入 tsc 口径**） |
 | `tests/unit/*.test.ts` | — | 单元用例（按模块分组：core / simulation / render / ui / diagnosis / save / idempotency 等）。**不声明固定行数**：用例随批次增长，历史声明值 869 已漂移至数千行（T-142 发现），改以「见 `tests/` 实际文件」为准，避免每次加用例都要同步 |
 | `tests/verification/*.test.ts` | — | 验证 / 独立复核用例（`edge-cases` / `cold-archive-s05` / `perf-s04` / `render-s06-*` / `ui-s07-*` / `s10-qareview` 等）。**同样不声明固定行数**，理由同上 |
 
@@ -56,10 +56,11 @@
 | `src/render/texture-format.ts` | 43 | ASTC → ETC2 → RGB565 → NONE 降级链；UI 图集固定 RGBA8888 |
 | `src/render/draw-list.ts` | 334 | 深度排序 + 按图集聚批 + DrawCall **估算** + `densityToSuffix`（0→无 / 1→d1 / 2→d2 / 3→d3） |
 | `src/render/flow-legend.ts` | 184 | **T-135**：枚举→`flow.*` 令牌 id 映射唯一落点 + `buildFlowLegend`（真实令牌填充不透明色块）+ `buildFlowOverlays`（`flowState[]` + 显式「边槽→格」映射 → `OverlaySpec[]`）；**T-137**：`flowEdgesFromTick(flowState, edgeCells, cellCount?)` 生产侧映射生成器（过滤哨兵 / 非法 / 越界 / 未知枚举，零色值 / 零阈值键 / 不 import simulation，哨兵按数值 -1 识别） |
+| `src/render/degradation-plan.ts` | 147 | **S-12 验收 3**：`architecture.md §10.4` 五步降级序列（天气雨雪 → 窗光/AO → VFX 数量 → 更早 L0 → 低档关全部 VFX）的**可执行契约**；`DEGRADATION_ORDER` 唯一真源 + `PROTECTED_CAPABILITIES`（§9.2 六项 + <100ms 反馈，G6 否决项）；`buildDegradationPlan(level)` 前缀构造 + `assertDegradationPlan` 对任意输入可判（乱序/跳步/触碰保护项必抛错）。纯声明+纯断言，不执行降级；真机按序关闭须实测。用例 `tests/unit/degradation-plan.test.ts`（DP-1~6，含两组牙齿自证） |
 | `src/render/backend.ts` | 33 | `RenderBackend` 契约（createNode / setFrame / setPosition / setScale / setDepth / destroy / batchBegin / batchEnd） |
 | `src/render/cocos/cocos-backend.ts` | 158 | 注入式 Cocos 适配（**不 import 'cc'**）；兄弟序 = `depthKey`；9-slice 预留；`verifiedInEngine=false` |
 
-- 对外导出：以上 10 个模块（含 `asset-naming` 与 T-135 的 `flow-legend`）均经 `src/index.ts` 的 `export *` 出口，故 `tsc --noEmit --strict … src/index.ts` 覆盖全部渲染模块；`src/render/cocos/` 亦经统一出口导入（仅类型 + 注入式工厂，无 `'cc'` 依赖）。
+- 对外导出：以上 11 个模块（含 `asset-naming`、T-135 的 `flow-legend` 与 S-12 的 `degradation-plan`）均经 `src/index.ts` 的 `export *` 出口，故 `tsc --noEmit --strict … src/index.ts` 覆盖全部渲染模块；`src/render/cocos/` 亦经统一出口导入（仅类型 + 注入式工厂，无 `'cc'` 依赖）。
 - 预览：`preview/build.mjs` 用 `module.stripTypeScriptTypes` 从 `src/` 生成 `preview/dist/*.mjs`（单一真源），`preview/serve.mjs` 起 `127.0.0.1:8123`；默认 L0 全图概览，支持 `?lod=L0|L1|L2`。
 
 **⚠️ `diffViewModel` 只产「格级」信号（D-08 口径）**：它比较 `changeStamp`（`inputVersion` 快照）并在不同底层数组时兜底比对 zone / density / unlocked；**不覆盖** `S` / `tickId` / `cycleId` / `budget` 等非格字段。这些字段变化（P4 满意度、P7 预算结算）时可能返回空数组——消费方须自行比对 VM 上的这些字段或全量重建绘制列表。渲染帧不触发模拟，也不因非格字段变化重绘地块。

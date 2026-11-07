@@ -25,5 +25,6 @@ export * from './render/asset-naming.ts';
 export * from './render/texture-format.ts';
 export * from './render/draw-list.ts';
 export * from './render/flow-legend.ts';
+export * from './render/degradation-plan.ts';
 export * from './render/backend.ts';
 export * from './render/cocos/cocos-backend.ts';
