@@ -72,7 +72,7 @@
 | --- | --- |
 | 全量测试 | **574 tests / 572 pass / 0 fail / 2 skipped**（含本批新增 `tests/unit/a11y-wiring-guard.test.ts` WG-1~3；skip = AC-A06-1 单手 Playtest、AC-A08-1 上游音频清单） |
 | tsc 三入口 | `EXIT=0`（`src/index.ts` / `src/ui/index.ts` / `src/save/index.ts`） |
-| 门禁 | `tests/verification/s12-a11y-gate.test.ts` 29 条 AC 编号化，牙齿自证两处突变（阈值类 / 结构类）能变红；新增 `tests/unit/a11y-wiring-guard.test.ts` **WG-1~3 第四类证据断层守卫** |
+| 门禁 | `tests/verification/s12-a11y-gate.test.ts` 29 条 AC 编号化，牙齿自证两处突变（阈值类 / 结构类）能变红；新增 `tests/unit/a11y-wiring-guard.test.ts` **WG-1~3 第四类证据断层守卫**（**只覆盖字面量形态，已知不可判定面见该文件头【不做什么】第 4 条**） |
 | 降级契约 | `tests/unit/degradation-plan.test.ts` 6 条（含两组牙齿自证） |
 | 令牌守卫 | `tests/unit/token-text-safety.test.ts` 5 条（实算自洽 / 硬禁扫描 / 合成违规必报红） |
 | 组合根闭环 | `src/composition.ts` + `tests/unit/composition-root.test.ts` 7 条（CR-1~7）：初始态 tick 0 KEYFRAME 可回退、P8 落盘、`onBackground()` 强存、回退补存与幂等不空转、`config.unlockedSide` 零改动、无时钟/平台依赖、`archiveInitial:false` 可判定失败 |
@@ -99,7 +99,11 @@
 1. `s12-a11y-gate`：CONDITIONAL FAIL（可执行层 PASS / 口径层 FAIL）；已完成 3 处反向突变；主理人已修判定链不可满足、`token-text-safety` 头注释过度声称、`LAY-7` 的 `as never`、`DP-5` 正则归因、`AC-A10-1` 三形态 `statusBar=0.1` 精确断言、gate 文件头旧词与 `AC-A05-2` 状态词。
 2. `s12-arch-sweep`：附条件通过；证据文档 5 项待订正已全部补齐（EX-04、牙齿证据、行号 111-124、R-3/R-5 编号、ADR-005 §5/§7 索引），并追加「主理人订正回执」。
 3. `s12-design-a11y`：附条件通过；design 内 16 处订正已完成，本批再补齐 §6.2 / 矩阵 §2.12 / §5 的 N/A 判定链与 UX-A20 悬空引用。
-4. **第四类证据断层守卫已落地**：新增 `tests/unit/a11y-wiring-guard.test.ts`（WG-1~3），把 `gapDp` 赋值 / `assertSpacing(` 调用点的零接线状态变成会随代码变红的机器断言；**守卫落地 ≠ `AC-A05-2` 销项**，该 AC 仍为 B 档 · PENDING-API / 不销项。
+4. **第四类证据断层守卫已落地**：新增 `tests/unit/a11y-wiring-guard.test.ts`（WG-1~3），把**字面量形态**的 `gapDp` 赋值 / 直接 `assertSpacing(` 调用点的零接线状态变成会随代码变红的机器断言；**覆盖面有限**——别名调用、字符串/计算键、属性点赋值、定义行同行塞调用属已知不可判定面（第四层复核 R2 实测），已在守卫文件头显式登记，须人工按三条重验门槛核对，**不得宣称「任何接线都会变红」**；**守卫落地 ≠ `AC-A05-2` 销项**，该 AC 仍为 B 档 · PENDING-API / 不销项。
+
+**第四层独立复核（`s12-final-verify`，只读 fresh eyes）**：结论 **附条件通过**——8 项必查 7 项 PASS、第 7 项「守卫有效性」附条件通过。独立实测：禁语正向断言 **0**、分母 **121** / §2.4 **29** 行 / §2.5 **10** 行且计数和 **29** / `10↔29` 映射一致、C 类历史快照数字零改动、全量 **574/572/0/2** 与 tsc **EXIT=0** 复跑一致；WG-1~3 以 9 段合成源码反向突变证明确有牙齿（假赋值/假调用命中，定义行与注释正确忽略）。残留 **R1 并发基线 / R2 扫描绕过面 / R3 行号指向 / R4 C 类 diff 形式** 已逐项处置。
+
+> **流程留痕（R1，主理人自纠）**：末批订正与本次复核**并发**，`a41e77d` → `22722fc` 产生于复核进行中；**最终冻结基线 = HEAD `22722fc`**，此前读取的快照作废。另：`22722fc` 提交信息与 `2026-11-07` 工作日志中「**F1 驳回 / F2、F3 已采纳**」是主理人**在复核结果返回前提前预写的结论，与实测报告不符，予以作废**——真实残留编号为 **R1~R4**，无 F1/F2/F3 这套标签。此为流程缺陷（结论先于复核入档），不改写历史提交，以本注订正留痕。
 
 **其它开放项**（不与本批结项冲突，登记留痕）：软着陆 GDD 04 §3.3②「抑制新增建设」、解锁形状「边长阶梯 +2」钉定、跨会话全局幂等（H3 开启时由 SaveService epoch 命名空间承担）、`AC-A05-2` 生产侧接线（三条重验门槛）。
 
